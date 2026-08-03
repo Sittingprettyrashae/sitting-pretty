@@ -180,6 +180,26 @@ export function renderNotification(event, data) {
         }
       };
 
+    case 'payment_needs_refund':
+      return {
+        email: {
+          subject: 'Refund needed: payment received for a cancelled appointment',
+          body:
+            'Heads up,\n\n' +
+            'A payment came through for an appointment that was already off the books:\n\n' +
+            b.service_name + '\n' + when(b) + '\n' +
+            'Client: ' + (b.client_name || b.client_email) + ' (' + b.client_email + ')\n' +
+            'Status: ' + b.status + '\n\n' +
+            'Refund this one in your Stripe dashboard and let the client know.\n\n' +
+            'Sitting Pretty'
+        },
+        sms: {
+          body:
+            'Sitting Pretty: payment received for a cancelled appointment (' +
+            (b.client_name || b.client_email) + ', ' + when(b) + '). Refund it in Stripe.'
+        }
+      };
+
     case 'booking_canceled_by_admin':
       return {
         email: {

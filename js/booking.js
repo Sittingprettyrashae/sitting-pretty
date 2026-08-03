@@ -211,7 +211,23 @@
 
   // Signed in with a usable profile: no account step at all, so a returning
   // client goes day/time straight to review.
-  const ready = () => !!(me && me.client && me.client.name && !S.pendingProfile && !S.offerPassword);
+  // SP.hasToken() is part of the test on purpose: the API client drops the
+  // token on any 401, and without this check a stale `me` would keep the
+  // account step hidden and lock the client out of booking entirely.
+  const ready = () => !!(SP.hasToken() && me && me.client && me.client.name && !S.pendingProfile && !S.offerPassword);
+
+  // Session died underneath us (expired, revoked, signed out in another tab).
+  // Forget who we thought we were and put the account step back.
+  function handleSessionLoss() {
+    me = null;
+    S.pendingProfile = false;
+    S.offerPassword = false;
+    if (typeof resetAuthUi === "function") resetAuthUi();
+    syncNav();
+    setSteps();
+    S.idx = Math.max(0, S.steps.indexOf("who"));
+  }
+  const isAuthLoss = (e) => e && (e.status === 401 || !SP.hasToken());
 
   function setSteps() {
     S.steps = [];
@@ -686,11 +702,35 @@
       book.disabled = true; msg(foot, "Saving your seat...");
       const seq = opSeq;
       try {
+        // The screen says "Booking as <name>", but the request travels with
+        // whatever token localStorage holds right now, and that can change in
+        // another tab. Confirm the session still belongs to the person named
+        // on screen before anything is booked or charged.
+        const shownId = c && c.id;
+        const fresh = await SP.me();
+        if (stale(seq)) return;
+        if (!fresh || !fresh.client) throw Object.assign(new Error("Please sign in again."), { status: 401 });
+        if (shownId && fresh.client.id !== shownId) {
+          me = fresh; syncNav();
+          msg(foot, "You are now signed in as " + (fresh.client.name || fresh.client.email) + ". Check the details and tap again to book.", true);
+          render();
+          return;
+        }
+        me = fresh;
         const data = await SP.request("/api/bookings", { method: "POST", body: { service_id: s.service_id, date: S.date, time: S.time, notes: S.notes } });
         if (stale(seq)) return; // sheet closed mid-save; the booking lives under My bookings
         if (data.checkout_url) { window.location.href = data.checkout_url; return; }
         render({ title: "Request sent", icon: "✓", head: "Ebony's got it!", copy: "She'll text you to confirm your deposit and your time. You can see this booking any time under My bookings." });
-      } catch (e) { if (stale(seq)) return; msg(foot, e.message, true); book.disabled = false; }
+      } catch (e) {
+        if (stale(seq)) return;
+        if (isAuthLoss(e)) {
+          handleSessionLoss();
+          render();
+          msg($("#sheetFoot"), "Your sign-in expired. Sign back in and your time is still here.", true);
+          return;
+        }
+        msg(foot, e.message, true); book.disabled = false;
+      }
     });
   }
 

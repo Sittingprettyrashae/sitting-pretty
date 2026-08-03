@@ -508,6 +508,18 @@ function recordFailure(key, windowMs) {
   rateBuckets.set(key, hits);
 }
 
+// Drops the most recent recorded attempt for a key. Sign-in records the attempt
+// up front (so concurrent guesses cannot slip past the gate) and calls this on
+// success, which keeps a client who knows her password from being locked out by
+// someone else guessing from the same address.
+function forgetFailure(key) {
+  const hits = rateBuckets.get(key);
+  if (!hits || !hits.length) return;
+  hits.pop();
+  if (hits.length) rateBuckets.set(key, hits);
+  else rateBuckets.delete(key);
+}
+
 // Warm, specific wait message instead of a bare "too many requests".
 function waitMinutes(keys, windowMs) {
   const now = Date.now();
@@ -731,8 +743,16 @@ function requireCheckoutAccess(req, url, session, booking) {
   throw new ApiError(403, 'You do not have access to this checkout');
 }
 
+// A booking can only take money while it is still waiting on one. Anything
+// canceled or already finished must refuse payment: a stale checkout link
+// sitting in an old email must never charge someone for an appointment that
+// is not going to happen.
+function isPayable(booking) {
+  return booking.status === 'awaiting_deposit' || booking.status === 'request';
+}
+
 function markDepositPaid(booking) {
-  if (booking.status === 'awaiting_deposit' || booking.status === 'request') {
+  if (isPayable(booking)) {
     booking.status = 'confirmed';
     notify('booking_confirmed',
       { email: booking.client_email, phone: booking.client_phone, name: booking.client_name },
@@ -844,6 +864,13 @@ async function handleApi(req, res, url) {
     }
     const password = typeof body.password === 'string' ? body.password : '';
     assertPasswordOk(password, email);
+    // The owner account is never claimable by whoever signs up first with her
+    // address. She signs in with an email code (which proves she owns the
+    // inbox) and sets a password from there.
+    if (ADMIN_EMAILS.includes(email) && !findClientByEmail(email)) {
+      throw new ApiError(403,
+        'This address is the owner account. Sign in with an email code, then set a password.');
+    }
     if (findClientByEmail(email)) {
       // Same message whether or not that account has a password: point them at
       // signing in and say nothing more.
@@ -869,33 +896,39 @@ async function handleApi(req, res, url) {
         waitMinutes([emailKey, ipKey], LOGIN_WINDOW_MS) +
         ' and try again, or sign in with an email code instead.');
     }
+    // Count the attempt BEFORE the async password check. Verifying a scrypt
+    // hash yields the event loop, so recording only on failure let a burst of
+    // concurrent requests all clear the gate before any of them was counted.
+    recordFailure(emailKey, LOGIN_WINDOW_MS);
+    recordFailure(ipKey, LOGIN_WINDOW_MS);
+    const forgiveAttempt = () => {
+      forgetFailure(emailKey);
+      forgetFailure(ipKey);
+    };
     // One message for a wrong password and for an email with no account, so this
     // endpoint never tells an attacker which emails are real.
     const wrong = 'That email and password do not match. Please try again.';
     if (!isEmail(email) || !password) {
-      recordFailure(emailKey, LOGIN_WINDOW_MS);
-      recordFailure(ipKey, LOGIN_WINDOW_MS);
       throw new ApiError(401, wrong);
     }
     const client = findClientByEmail(email);
     if (!client) {
       await verifyPassword(password, DECOY_HASH); // keep the timing identical
-      recordFailure(emailKey, LOGIN_WINDOW_MS);
-      recordFailure(ipKey, LOGIN_WINDOW_MS);
       throw new ApiError(401, wrong);
     }
     if (!client.password_hash) {
-      // Older account made by email code only. Not a bad guess, so it does not
-      // count against the rate limit.
+      // Older account made by email code only. This stays counted: leaving it
+      // unthrottled turned it into an unlimited oracle for which of her
+      // clients have accounts.
+      await verifyPassword(password, DECOY_HASH); // same timing as every other path
       throw new ApiError(409,
         'This account does not have a password yet. Sign in with an email code, then set one.',
         { needs_password_setup: true });
     }
     if (!(await verifyPassword(password, client.password_hash))) {
-      recordFailure(emailKey, LOGIN_WINDOW_MS);
-      recordFailure(ipKey, LOGIN_WINDOW_MS);
       throw new ApiError(401, wrong);
     }
+    forgiveAttempt(); // correct password: do not hold it against her
     const token = startSession(client, 'password');
     save();
     return sendJson(res, 200, { token, client: publicClient(client) });
@@ -948,6 +981,13 @@ async function handleApi(req, res, url) {
       // address back here. Disabled the moment real credentials exist.
       const email = cleanStr(url.searchParams.get('demo_email'), 200).toLowerCase();
       if (!isEmail(email)) throw new ApiError(400, 'Enter a valid email address');
+      // Nothing here verifies the address the way Google would, so this path
+      // must never hand out the owner account. Without this, anyone who can
+      // reach the demo could type her address and land in the dashboard.
+      if (ADMIN_EMAILS.includes(email)) {
+        throw new ApiError(403,
+          'The demo sign-in cannot be used for the owner account. Sign in with an email code instead.');
+      }
       profile = { email, name: cleanStr(url.searchParams.get('demo_name'), 100) || null };
     }
     const client = upsertGoogleClient(profile.email, profile.name);
@@ -1128,7 +1168,13 @@ async function handleApi(req, res, url) {
     const booking = db.bookings.find((b) => b.id === session.booking_id);
     if (!booking) throw new ApiError(404, 'Booking not found');
     requireCheckoutAccess(req, url, session, booking);
-    return sendJson(res, 200, { booking, amount_cents: session.amount_cents, service_name: booking.service_name });
+    return sendJson(res, 200, {
+      booking,
+      amount_cents: session.amount_cents,
+      service_name: booking.service_name,
+      payable: isPayable(booking) && !session.paid,
+      already_paid: !!session.paid,
+    });
   }
 
   if (method === 'POST' && (m = /^\/api\/checkout\/([\w-]+)\/pay$/.exec(p))) {
@@ -1138,6 +1184,13 @@ async function handleApi(req, res, url) {
     const booking = db.bookings.find((b) => b.id === session.booking_id);
     if (!booking) throw new ApiError(404, 'Booking not found');
     requireCheckoutAccess(req, url, session, booking);
+    // Never take money for an appointment that is no longer standing.
+    if (!isPayable(booking)) {
+      throw new ApiError(409, booking.status === 'canceled'
+        ? 'This appointment was cancelled, so it can no longer be paid for. Text Ebony if you would like to rebook.'
+        : 'This appointment is already settled, so there is nothing left to pay.');
+    }
+    if (session.paid) return sendJson(res, 200, { ok: true, booking, already_paid: true });
     session.paid = true;
     markDepositPaid(booking);
     save();
@@ -1155,7 +1208,15 @@ async function handleApi(req, res, url) {
       const booking = db.bookings.find((b) => b.id === bookingId);
       if (booking) {
         if (obj.id && db.checkout_sessions[obj.id]) db.checkout_sessions[obj.id].paid = true;
-        markDepositPaid(booking);
+        if (isPayable(booking)) {
+          markDepositPaid(booking);
+        } else {
+          // Money moved for an appointment that is no longer standing. Do not
+          // silently swallow it: flag it so Ebony can refund the client.
+          notify('payment_needs_refund',
+            { email: ADMIN_EMAILS[0], phone: null, name: 'Ke’Ebonie' },
+            { booking });
+        }
         save();
       }
     }
