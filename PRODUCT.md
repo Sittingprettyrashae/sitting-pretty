@@ -12,9 +12,10 @@ Black women (and moms booking for kids) in Fort Worth / DFW, ages ~18-45, browsi
 Warm, confident, personal. Ebony's own voice: "sit in my chair, we talk and share life while I bless your hair." Glam but never cold or corporate. She books one client at a time, kids welcome. It should feel like HER chair, not a platform.
 
 ## Anti-references
-- StyleSeat itself: generic marketplace chrome, her name in tiny text under platform branding.
-- Beauty-template pink/rose-gold sites. Reflex aesthetic, avoid.
+- StyleSeat itself: generic marketplace chrome, her name in tiny text under platform branding. BUT its booking UX patterns are the familiarity target (client's explicit ask) — steal the mental model, not the chrome.
+- Bubblegum-pink template sites. The direction IS feminine and light (client ask, 2026-08-02), but elevated: dusty rose + plum + ivory, not neon pink.
 - Cheap linktree-style link piles.
+- Dark themes: v1 was espresso/copper; client said it "doesn't give feminine." Light only.
 
 ## Strategic principles
 - Every price, duration, deposit, policy comes verbatim from her StyleSeat data. Nothing invented.

@@ -1,34 +1,43 @@
-# DESIGN.md — Sitting Pretty
+# DESIGN.md — Sitting Pretty (v2, client-directed feminine light)
+
+## Client direction (2026-08-02, overrides v1)
+Ke'Ebonie (via Nelson): v1's dark espresso/copper "doesn't give feminine," and the
+site must feel easy and familiar to clients coming from StyleSeat. So: light,
+soft, glam; layout patterns her clients already know (service list with prices
+and Book buttons, photo grid, rating up top, simple date/time picker).
 
 ## Scene sentence
-A client on her couch at 10pm, phone in hand, dark room, deciding whether to book a frontal install for Saturday. Dark, warm, luxe surface so the photos glow like an IG feed; big tap targets; prices readable at arm's length.
+A client on her phone at night, tapping through from Instagram: soft warm light
+page that feels like a beauty brand, photos glowing like an IG feed, prices
+readable instantly, booking in four familiar taps.
 
 ## Theme
-Dark espresso-cocoa, warm not gray. Committed color strategy: warm copper/caramel carries CTAs, prices, and accents (30-40% presence). No pink reflex, no black/gold barbershop reflex.
-
-## Palette (OKLCH)
-- bg: oklch(16% 0.015 55) deep espresso brown
-- bg-raised: oklch(21% 0.02 55)
-- ink: oklch(94% 0.012 75) warm cream
-- ink-dim: oklch(72% 0.02 70)
-- accent: oklch(72% 0.14 55) copper/caramel
-- accent-deep: oklch(58% 0.13 45)
-- blush: oklch(80% 0.06 30) soft warm secondary (sparingly)
+Warm ivory surfaces, deep plum-cocoa ink, dusty raspberry-rose as the committed
+accent (CTAs, prices, selected states), champagne for stars/small warmth.
+Elevated rosewater, NOT bubblegum: chroma stays restrained, plum keeps it adult.
+Tokens live in `css/tokens.css` — both pages consume them.
 
 ## Typography
-- Display + body: Satoshi (Fontshare). Weights 500/700/900.
-- Script accent for "Sitting Pretty" wordmark moments: Playball or similar single script, used only for the brand word.
-- Hero H1 clamp(2.6rem, 7vw, 5.5rem), max 2-3 lines, wide container.
-- Body max 70ch, scale ratio >= 1.28.
+- Display + body: Satoshi (Fontshare) 500/700/900.
+- Script accent: Playball, for the wordmark and section eyebrows only.
+- Hero H1 2–3 lines max, wide container. Body ≤70ch, scale ratio ≥1.28.
+
+## Layout (StyleSeat-familiar)
+- Sticky light pill nav: wordmark, Prices, My bookings, Book Now.
+- Hero: warm, photo-forward, rating line, primary CTA.
+- Services: category accordion, each row = name + duration/deposit meta,
+  price right-aligned, rose Book button. (StyleSeat's exact mental model.)
+- Booking sheet (bottom sheet on mobile, modal on desktop): service summary →
+  date strip (next 14 days) → time chips → email code login → deposit checkout
+  → confirmed screen. Progress dots, one step visible at a time.
+- Gallery grid, about, policies, hours: keep v1 content, restyled light.
 
 ## Motion
-- GSAP + ScrollTrigger via CDN. Intro hero reveal on load; pinned services intro; scale-and-fade gallery images; infinite category marquee.
-- All easings ease-out (cubic-bezier(0.23,1,0.32,1)); UI transitions <= 250ms; scroll scrubs slow.
-- prefers-reduced-motion: kill transforms, keep fades.
+GSAP scroll reveals stay but gentler (smaller y, faster). Sheet transitions
+follow Emil rules: 200-250ms, ease-out, translateY(100%) in/out, scale .97 on
+press. prefers-reduced-motion: fades only.
 
-## Components
-- Floating pill nav (glass, minimal: Work, Services, About, Book).
-- Editorial split hero: text left, portrait/photo right, massive negative space.
-- Inline pill photos inside the big headline.
-- Services: category accordion (horizontal expand on desktop where sane, vertical on mobile), every service with price, duration, deposit.
-- Booking: sms:// and tel:// links, service name pre-filled in SMS body.
+## Don'ts
+- No dark theme anywhere in client-facing pages.
+- No neon/bubblegum pink; rose stays dusty, ink stays plum.
+- Never text over faces. Real client photos only.

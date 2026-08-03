@@ -1,0 +1,63 @@
+/* Sitting Pretty — shared design tokens (v2 feminine light)
+   Single source of truth for index.html and dashboard.html. */
+:root{
+  /* surfaces: warm ivory, never clinical white */
+  --bg: oklch(97.5% 0.009 60);
+  --surface: oklch(99.2% 0.004 80);
+  --surface-2: oklch(95.5% 0.015 30);      /* blush wash */
+  --line: oklch(89% 0.018 30);
+  --line-strong: oklch(80% 0.025 25);
+
+  /* ink: deep plum-cocoa, feminine but readable */
+  --ink: oklch(27% 0.05 350);
+  --ink-dim: oklch(46% 0.035 345);
+  --ink-faint: oklch(60% 0.028 340);
+
+  /* accents */
+  --rose: oklch(58% 0.145 5);              /* dusty raspberry-rose: CTAs, prices */
+  --rose-deep: oklch(48% 0.15 0);
+  --rose-soft: oklch(92% 0.035 10);        /* chips, hovers, selected states */
+  --champagne: oklch(80% 0.065 80);        /* stars, small warm details */
+  --success: oklch(55% 0.1 155);
+  --danger: oklch(55% 0.16 25);
+
+  /* type */
+  --font-body: 'Satoshi', -apple-system, sans-serif;
+  --font-script: 'Playball', cursive;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* shape */
+  --r-card: 1.1rem;
+  --r-pill: 99px;
+  --shadow-soft: 0 4px 18px oklch(40% 0.05 350 / .08);
+  --shadow-lift: 0 10px 32px oklch(40% 0.06 350 / .14);
+}
+
+/* Buttons — same everywhere */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:.5rem;
+  font-family:var(--font-body);font-weight:700;font-size:1rem;
+  border-radius:var(--r-pill);padding:.85rem 1.6rem;border:1px solid transparent;
+  cursor:pointer;min-height:48px;
+  transition:transform .16s var(--ease-out), background .2s var(--ease-out),
+             border-color .2s var(--ease-out), color .2s var(--ease-out);
+}
+.btn:active{transform:scale(.97)}
+.btn-solid{background:var(--rose);color:oklch(98% 0.008 30)}
+.btn-solid:hover{background:var(--rose-deep)}
+.btn-ghost{border-color:var(--line-strong);color:var(--ink);background:transparent}
+.btn-ghost:hover{border-color:var(--rose);color:var(--rose)}
+.btn-danger{background:transparent;border-color:var(--line-strong);color:var(--danger)}
+.btn-danger:hover{border-color:var(--danger)}
+.btn[disabled]{opacity:.45;pointer-events:none}
+
+/* Status chips */
+.chip{display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;font-weight:700;
+  padding:.28rem .75rem;border-radius:var(--r-pill);white-space:nowrap}
+.chip-awaiting{background:oklch(94% 0.06 80);color:oklch(45% 0.1 70)}
+.chip-request{background:oklch(93% 0.03 260);color:oklch(42% 0.08 265)}
+.chip-confirmed{background:oklch(93% 0.045 150);color:oklch(38% 0.09 155)}
+.chip-completed{background:var(--rose-soft);color:var(--rose-deep)}
+.chip-canceled{background:oklch(93% 0.02 25);color:oklch(45% 0.1 25);text-decoration:none}

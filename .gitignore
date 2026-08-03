@@ -1,3 +1,5 @@
 .shots/
 .playwright-mcp/
 .DS_Store
+server/db.json
+server/db.json.tmp
