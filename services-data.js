@@ -44,12 +44,14 @@ const SERVICES = [
     ["Miracle Knots", "$125", "5 hr", ""],
     ["Men Braids", "$25", "1 hr 45 min", "$15 deposit · designs +$5"],
     ["Men / Half Head Box Braids", "$80", "3 hr", "$40 deposit · smaller +$25"],
-    ["Kid's Braids (Lil Girls, w/ weave)", "$50", "2 hr", "$25 deposit · ages 5–10"],
-    ["Kid's Braids (Girls, no weave)", "$35", "2 hr 30 min", "$15 deposit · under 7"],
-    ["Kid's Braids (Lil Boys)", "$30", "2 hr", "Ages 5–8"],
     ["Just Braided Down", "$30", "1 hr", "Foundation for wig, crochet, sew in, or QW"],
     ["Scalp Braids Touch Up", "$45", "1 hr", ""],
     ["Add Hair to Braids or Twist", "$50+", "15 min", "Color match, fit + set"]
+  ]},
+  { cat: "Kids' Braids", items: [
+    ["Kid's Braids (Lil Girls, w/ weave)", "$50", "2 hr", "$25 deposit · ages 5–10"],
+    ["Kid's Braids (Girls, no weave)", "$35", "2 hr 30 min", "$15 deposit · under 7"],
+    ["Kid's Braids (Lil Boys)", "$30", "2 hr", "Ages 5–8"]
   ]},
   { cat: "Crochet", items: [
     ["Crochet", "$65", "1 hr 45 min", "$30 deposit · box braids, locs, Senegalese, passion twist"],
