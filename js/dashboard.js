@@ -1,6 +1,7 @@
 /* Sitting Pretty admin dashboard.
    Talks to window.SP from js/api.js:
-   SP.request(path, opts), SP.requestCode(email), SP.verify(email, code), SP.logout().
+   SP.request(path, opts), SP.login(email, password), SP.loginWithGoogle(),
+   SP.requestCode(email, purpose), SP.verify(email, code), SP.setPassword(pw), SP.logout().
    Token lives in localStorage "sp_token" and is managed by the api client. */
 (function () {
   "use strict";
@@ -19,6 +20,7 @@
     calMonth: new Date().getMonth(),
     selectedDay: null,
     loginEmail: "",
+    codePurpose: "login",
     outboxAvailable: false,
     outboxMessages: []
   };
@@ -161,14 +163,31 @@
     if (msg) { el.textContent = msg; el.hidden = false; }
     else { el.textContent = ""; el.hidden = true; }
   }
+  // Login card has three panes: password (default), code fallback, and the
+  // optional "set a password" step after a code sign in.
+  function showPane(name) {
+    $("pane-password").hidden = name !== "password";
+    $("code-form").hidden = name !== "code";
+    $("setpw-form").hidden = name !== "setpw";
+  }
   function showLogin(errText) {
     $("splash").hidden = true;
     $("app-view").hidden = true;
     $("logout-btn").hidden = true;
     $("login-view").hidden = false;
     setLoginError(errText || "");
-    $("email-form").hidden = false;
-    $("code-form").hidden = true;
+    showPane("password");
+  }
+  // Only the owner account gets in; anyone else is signed back out.
+  function admitOrRefuse(res) {
+    if (res && res.client && res.client.is_admin) {
+      state.client = res.client;
+      enterApp();
+      return true;
+    }
+    safeLogout();
+    showLogin("That account does not have dashboard access. Sign in with the owner email.");
+    return false;
   }
   function enterApp() {
     $("splash").hidden = true;
@@ -661,50 +680,102 @@
 
   // ---------------- wiring ----------------
   function wire() {
-    // login
-    $("email-form").addEventListener("submit", function (ev) {
-      ev.preventDefault();
-      var email = $("login-email").value.trim();
-      if (!email) return;
-      var btn = $("email-submit");
-      btn.disabled = true;
+    // ---- login: password, Google, code fallback ----
+    $("setpw-hint").textContent = window.SP.PASSWORD_HINT;
+
+    document.querySelectorAll(".pw-toggle").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var input = $(btn.getAttribute("data-pw"));
+        if (!input) return;
+        var show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.textContent = show ? "Hide" : "Show";
+        btn.setAttribute("aria-pressed", show ? "true" : "false");
+        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        input.focus();
+      });
+    });
+
+    $("google-btn").addEventListener("click", function () {
       setLoginError("");
-      window.SP.requestCode(email).then(function () {
-        btn.disabled = false;
-        state.loginEmail = email;
-        $("email-form").hidden = true;
-        $("code-form").hidden = false;
-        $("code-sent-line").textContent = "We sent a 6-digit code to " + email + ".";
+      window.SP.loginWithGoogle();
+    });
+
+    // Send a code and swap to the code pane. purpose: "login" | "reset".
+    function sendCode(email, purpose, note) {
+      if (!window.SP.emailLooksOk(email)) {
+        setLoginError("That email does not look right. Check it and try again.");
+        return;
+      }
+      setLoginError("");
+      state.loginEmail = email;
+      state.codePurpose = purpose;
+      window.SP.requestCode(email, purpose).then(function () {
+        showPane("code");
+        $("code-sent-line").textContent = note || ("We sent a 6-digit code to " + email + ".");
         $("login-code").value = "";
         $("login-code").focus();
         refreshOutbox();
       }).catch(function (err) {
-        btn.disabled = false;
         setLoginError(errMsg(err));
       });
+    }
+
+    $("password-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var email = $("login-email").value.trim();
+      var pw = $("login-password").value;
+      if (!window.SP.emailLooksOk(email)) return setLoginError("That email does not look right. Check it and try again.");
+      if (!pw) return setLoginError("Enter your password, or use the code option below.");
+      var btn = $("password-submit");
+      btn.disabled = true;
+      setLoginError("");
+      window.SP.login(email, pw).then(function (res) {
+        btn.disabled = false;
+        state.loginEmail = email;
+        admitOrRefuse(res);
+      }).catch(function (err) {
+        btn.disabled = false;
+        if (err && err.needsPasswordSetup) {
+          sendCode(email, "reset", "This account was made before we had passwords, so we emailed you a code this once. After that you can set one.");
+          return;
+        }
+        setLoginError(errMsg(err));
+      });
+    });
+
+    $("forgot-btn").addEventListener("click", function () {
+      sendCode($("login-email").value.trim(), "reset", "We emailed you a 6-digit code. Enter it and you can set a new password.");
+    });
+
+    $("code-instead-btn").addEventListener("click", function () {
+      sendCode($("login-email").value.trim(), "login", null);
     });
 
     $("code-form").addEventListener("submit", function (ev) {
       ev.preventDefault();
       var code = $("login-code").value.trim();
-      if (!code) return;
+      if (code.length !== 6) return setLoginError("Enter the 6-digit code we emailed you.");
       var btn = $("code-submit");
       btn.disabled = true;
       setLoginError("");
       window.SP.verify(state.loginEmail, code).then(function (res) {
         btn.disabled = false;
-        try {
-          if (res && res.token && !localStorage.getItem("sp_token")) {
-            localStorage.setItem("sp_token", res.token);
-          }
-        } catch (e) { /* noop */ }
-        if (res && res.client && res.client.is_admin) {
-          state.client = res.client;
-          enterApp();
-        } else {
+        var client = res && res.client;
+        if (!client || !client.is_admin) {
           safeLogout();
           showLogin("That account does not have dashboard access. Sign in with the owner email.");
+          return;
         }
+        state.client = client;
+        // Invite, never require: a password makes the next visit one tap.
+        if (state.codePurpose === "reset" || !client.has_password) {
+          $("new-password").value = "";
+          showPane("setpw");
+          $("new-password").focus();
+          return;
+        }
+        enterApp();
       }).catch(function (err) {
         btn.disabled = false;
         setLoginError(errMsg(err));
@@ -712,10 +783,32 @@
     });
 
     $("change-email-btn").addEventListener("click", function () {
-      $("code-form").hidden = true;
-      $("email-form").hidden = false;
       setLoginError("");
+      showPane("password");
       $("login-email").focus();
+    });
+
+    $("setpw-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var pw = $("new-password").value;
+      var bad = window.SP.passwordProblem(pw);
+      if (bad) return setLoginError(bad);
+      var btn = $("setpw-submit");
+      btn.disabled = true;
+      setLoginError("");
+      window.SP.setPassword(pw).then(function (res) {
+        btn.disabled = false;
+        if (res && res.client) state.client = res.client;
+        enterApp();
+      }).catch(function (err) {
+        btn.disabled = false;
+        setLoginError(errMsg(err));
+      });
+    });
+
+    $("setpw-skip").addEventListener("click", function () {
+      setLoginError("");
+      enterApp();
     });
 
     $("logout-btn").addEventListener("click", function () {
@@ -843,14 +936,10 @@
       showLogin();
       return;
     }
+    // The session is long lived, so a return visit on her phone lands straight
+    // in the dashboard with no sign-in step at all.
     api("/api/me").then(function (res) {
-      if (res && res.client && res.client.is_admin) {
-        state.client = res.client;
-        enterApp();
-      } else {
-        safeLogout();
-        showLogin("That account does not have dashboard access. Sign in with the owner email.");
-      }
+      admitOrRefuse(res);
     }).catch(function () {
       showLogin();
     });

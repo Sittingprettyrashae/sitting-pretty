@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { renderNotification } from './templates.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,8 +30,38 @@ const RATE_MAX_REQUESTS = 5;
 const DEPOSIT_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
+// Sessions: 90 days, sliding. Every authenticated request pushes the expiry
+// back out so repeat clients stay signed in. The new expiry is only written to
+// disk once an hour per session to keep writes cheap.
+const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const SESSION_TOUCH_MS = 60 * 60 * 1000;
+
+// Password sign-in: 8 failed attempts per 15 minutes, per email and per IP.
+// Only failures count, so someone typing the right password is never locked out.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 8;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 200;
+
+// Google OAuth. If both env vars are set the real Google flow runs; otherwise
+// the local demo account chooser stands in for it.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const googleConfigured = () => Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
+
+// Seeded demo client tasha@demo.local gets this password so the password path
+// is testable the moment the server boots. Documented in server/README.md.
+const DEMO_CLIENT_PASSWORD = 'SittingPretty2026';
+
 class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, extra) {
+    super(message);
+    this.status = status;
+    this.extra = extra || null;
+  }
 }
 
 /* ---------------- service catalog (derived from services-data.js) ---------- */
@@ -141,10 +172,22 @@ let saveTimer = null;
 
 function defaultDb() {
   return {
-    clients: [], bookings: [], sessions: {}, codes: {},
+    clients: [], bookings: [], sessions: {}, codes: {}, oauth_states: {},
     checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [],
     seq: {}
   };
+}
+
+// Bring a db.json written by an older build up to the current shape. Existing
+// clients keep working: they simply have no password yet and sign in by code.
+function normalizeDb() {
+  if (!db.oauth_states) db.oauth_states = {};
+  if (!db.sessions) db.sessions = {};
+  for (const c of db.clients) {
+    if (c.password_hash === undefined) c.password_hash = null;
+    if (!c.auth_provider) c.auth_provider = 'code';
+    if (c.google_linked === undefined) c.google_linked = false;
+  }
 }
 
 function saveNow() {
@@ -172,6 +215,8 @@ function loadDb() {
   try {
     db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
     if (!db || !Array.isArray(db.clients)) throw new Error('malformed');
+    normalizeDb();
+    save();
   } catch {
     seedDemo();
     saveNow();
@@ -181,10 +226,12 @@ function loadDb() {
 
 /* ---------------- demo seed ------------------------------------------------- */
 
-function makeClient(email, name, phone, isAdmin) {
+function makeClient(email, name, phone, isAdmin, extra) {
   const c = {
     id: nextId('cl'), email, name: name || null, phone: phone || null,
-    is_admin: !!isAdmin, created_at: new Date().toISOString()
+    is_admin: !!isAdmin, created_at: new Date().toISOString(),
+    password_hash: null, auth_provider: 'code', google_linked: false,
+    ...(extra || {})
   };
   db.clients.push(c);
   return c;
@@ -194,7 +241,11 @@ function seedDemo() {
   db = defaultDb();
   const admin = makeClient('ebony@demo.local', "Ke'Ebonie Hill", '(817) 704-8300', true);
   const maya = makeClient('maya@demo.local', 'Maya Johnson', '(817) 555-0141', false);
-  const tasha = makeClient('tasha@demo.local', 'Tasha Reeves', '(682) 555-0163', false);
+  // Tasha ships with a known demo password so the password flow is testable
+  // right away. Everyone else is code-only, like accounts made before passwords.
+  const tasha = makeClient('tasha@demo.local', 'Tasha Reeves', '(682) 555-0163', false, {
+    password_hash: hashPasswordSync(DEMO_CLIENT_PASSWORD), auth_provider: 'password'
+  });
   const renee = makeClient('renee@demo.local', 'Renee Carter', '(214) 555-0128', false);
   void admin;
 
@@ -259,10 +310,87 @@ function notify(event, target, data) {
   if (t.sms && target.phone) pushOutbox('sms', target.phone, null, t.sms.body);
 }
 
+/* ---------------- passwords -------------------------------------------------- */
+
+// scrypt with a fresh 16-byte salt per user. Stored as scrypt$N$salt$hash so the
+// cost parameter can be raised later without breaking existing hashes.
+// The plaintext password is never stored, logged, or returned.
+const scryptAsync = promisify(crypto.scrypt);
+const SCRYPT_N = 16384;
+const SCRYPT_OPTS = { N: SCRYPT_N, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const SCRYPT_KEYLEN = 64;
+
+// Short list of passwords that are guessed first in any real attack.
+const TRIVIAL_PASSWORDS = new Set([
+  'password', 'password1', 'password12', 'password123', 'passw0rd', 'p@ssword',
+  '12345678', '123456789', '1234567890', '123123123', '11111111', '00000000',
+  'qwertyui', 'qwerty123', 'qwertyuiop', 'asdfghjkl', 'abc12345', 'abcd1234',
+  'iloveyou', 'letmein1', 'welcome1', 'welcome123', 'admin123', 'changeme',
+  'trustno1', 'sunshine1', 'princess1', 'football1', 'baseball1', 'monkey123',
+  'dragon123', 'superman1', 'hairstylist', 'sittingpretty', 'beautiful1'
+]);
+
+function encodeHash(saltBuf, keyBuf, n) {
+  return 'scrypt$' + n + '$' + saltBuf.toString('hex') + '$' + keyBuf.toString('hex');
+}
+
+function hashPasswordSync(password) {
+  const salt = crypto.randomBytes(16);
+  return encodeHash(salt, crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_OPTS), SCRYPT_N);
+}
+
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const key = await scryptAsync(password, salt, SCRYPT_KEYLEN, SCRYPT_OPTS);
+  return encodeHash(salt, key, SCRYPT_N);
+}
+
+async function verifyPassword(password, stored) {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'scrypt') return false;
+  const n = Number(parts[1]);
+  if (!Number.isInteger(n) || n < 1024) return false;
+  let salt; let expected;
+  try {
+    salt = Buffer.from(parts[2], 'hex');
+    expected = Buffer.from(parts[3], 'hex');
+  } catch { return false; }
+  if (!salt.length || !expected.length) return false;
+  const actual = await scryptAsync(password, salt, expected.length, { ...SCRYPT_OPTS, N: n });
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+// Unknown emails are checked against this throwaway hash so a wrong password and
+// a nonexistent account take the same amount of time (no timing enumeration).
+const DECOY_HASH = hashPasswordSync(crypto.randomBytes(32).toString('hex'));
+
+function assertPasswordOk(password, email) {
+  if (typeof password !== 'string' || !password) {
+    throw new ApiError(400, 'Please choose a password.');
+  }
+  if (password.length < PASSWORD_MIN) {
+    throw new ApiError(400, 'Please use at least ' + PASSWORD_MIN + ' characters for your password.');
+  }
+  if (password.length > PASSWORD_MAX) {
+    throw new ApiError(400, 'That password is too long. Please keep it under ' + PASSWORD_MAX + ' characters.');
+  }
+  const flat = password.trim().toLowerCase();
+  const local = String(email || '').split('@')[0].toLowerCase();
+  if (TRIVIAL_PASSWORDS.has(flat) || (local.length >= 4 && flat === local) || flat === String(email || '').toLowerCase()) {
+    throw new ApiError(400, 'That password is too easy to guess. Please pick something else.');
+  }
+  return password;
+}
+
 /* ---------------- clients, auth, sessions ----------------------------------- */
 
 function publicClient(c) {
-  return { id: c.id, email: c.email, name: c.name, phone: c.phone, is_admin: !!c.is_admin };
+  return {
+    id: c.id, email: c.email, name: c.name, phone: c.phone,
+    is_admin: !!c.is_admin,
+    has_password: !!c.password_hash,
+    auth_provider: c.auth_provider || 'code'
+  };
 }
 
 function findClientByEmail(email) {
@@ -273,12 +401,66 @@ function hashCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
 
-function authClient(req) {
+function isEmail(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v || '');
+}
+
+function clientIp(req) {
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function bearerToken(req) {
   const m = /^Bearer\s+([A-Za-z0-9]{16,64})$/i.exec(req.headers.authorization || '');
-  if (!m) return null;
-  const sess = db.sessions[m[1]];
+  return m ? m[1] : null;
+}
+
+// Opaque random token, stored server side only. auth_provider records how this
+// sign-in happened; any existing password is left alone.
+function startSession(client, provider) {
+  if (provider) client.auth_provider = provider;
+  client.is_admin = ADMIN_EMAILS.includes(client.email);
+  const token = crypto.randomBytes(24).toString('hex');
+  const now = Date.now();
+  db.sessions[token] = {
+    client_id: client.id,
+    provider: provider || 'code',
+    created_at: new Date(now).toISOString(),
+    last_seen: new Date(now).toISOString(),
+    expires: new Date(now + SESSION_TTL_MS).toISOString()
+  };
+  save();
+  return token;
+}
+
+function endSession(token) {
+  if (token && db.sessions[token]) { delete db.sessions[token]; save(); }
+}
+
+function endAllSessionsFor(clientId) {
+  for (const [tok, s] of Object.entries(db.sessions)) {
+    if (s.client_id === clientId) delete db.sessions[tok];
+  }
+  save();
+}
+
+function authClient(req) {
+  const token = bearerToken(req);
+  if (!token) return null;
+  const sess = db.sessions[token];
   if (!sess) return null;
-  return db.clients.find((c) => c.id === sess.client_id) || null;
+  const now = Date.now();
+  const expires = Date.parse(sess.expires || '') || 0;
+  if (expires && expires <= now) { delete db.sessions[token]; save(); return null; }
+  const client = db.clients.find((c) => c.id === sess.client_id) || null;
+  if (!client) { delete db.sessions[token]; save(); return null; }
+  // Sliding expiry: every authenticated request pushes the 90 days back out.
+  const lastSeen = Date.parse(sess.last_seen || '') || 0;
+  if (now - lastSeen > SESSION_TOUCH_MS) {
+    sess.last_seen = new Date(now).toISOString();
+    sess.expires = new Date(now + SESSION_TTL_MS).toISOString();
+    save();
+  }
+  return client;
 }
 
 function requireAuth(req) {
@@ -297,14 +479,167 @@ function requireAdmin(req) {
 
 const rateBuckets = new Map(); // key -> [timestamps]
 
-function rateLimitHit(key) {
+function recentHits(key, windowMs) {
   const now = Date.now();
-  const hits = (rateBuckets.get(key) || []).filter((t) => now - t < RATE_WINDOW_MS);
-  const limited = hits.length >= RATE_MAX_REQUESTS;
-  if (!limited) hits.push(now);
+  const hits = (rateBuckets.get(key) || []).filter((t) => now - t < windowMs);
   if (hits.length) rateBuckets.set(key, hits);
   else rateBuckets.delete(key);
-  return limited;
+  return hits;
+}
+
+// Consuming check: used by the code-request limits (5 per 15 min, unchanged).
+function rateLimitHit(key, max = RATE_MAX_REQUESTS, windowMs = RATE_WINDOW_MS) {
+  const hits = recentHits(key, windowMs);
+  if (hits.length >= max) return true;
+  hits.push(Date.now());
+  rateBuckets.set(key, hits);
+  return false;
+}
+
+// Non-consuming check plus an explicit recorder: used by password sign-in, where
+// only failed attempts count against the limit.
+function isRateLimited(key, max, windowMs) {
+  return recentHits(key, windowMs).length >= max;
+}
+
+function recordFailure(key, windowMs) {
+  const hits = recentHits(key, windowMs);
+  hits.push(Date.now());
+  rateBuckets.set(key, hits);
+}
+
+// Warm, specific wait message instead of a bare "too many requests".
+function waitMinutes(keys, windowMs) {
+  const now = Date.now();
+  let oldest = now;
+  for (const k of keys) {
+    for (const t of (rateBuckets.get(k) || [])) if (t < oldest) oldest = t;
+  }
+  const mins = Math.max(1, Math.ceil((windowMs - (now - oldest)) / 60000));
+  return mins + (mins === 1 ? ' minute' : ' minutes');
+}
+
+/* ---------------- google sign-in --------------------------------------------- */
+
+// The demo chooser and the real Google flow share everything except how the
+// verified email is obtained, so switching to production is only a matter of
+// setting GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
+
+// Only same-origin paths may be redirected back to (no open redirect), and the
+// caller's own hash is dropped because we append #sp_token to it.
+function safeRedirect(v) {
+  let r = cleanStr(v, 300) || '/';
+  if (!r.startsWith('/') || r.startsWith('//') || r.startsWith('/\\')) r = '/';
+  const hash = r.indexOf('#');
+  if (hash >= 0) r = r.slice(0, hash);
+  return r || '/';
+}
+
+function purgeOauthStates() {
+  const now = Date.now();
+  for (const [k, v] of Object.entries(db.oauth_states || {})) {
+    if (!v || (Date.parse(v.expires || '') || 0) <= now) delete db.oauth_states[k];
+  }
+}
+
+// CSRF defense for the OAuth round trip: unguessable value minted here, stored
+// server side with a 10 minute expiry, single use, checked in the callback.
+// The real Google flow needs exactly this, so the demo uses it too.
+function createOauthState(redirect) {
+  purgeOauthStates();
+  const state = crypto.randomBytes(24).toString('hex');
+  db.oauth_states[state] = {
+    redirect,
+    created_at: new Date().toISOString(),
+    expires: new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString()
+  };
+  save();
+  return state;
+}
+
+function peekOauthState(state) {
+  const rec = db.oauth_states[state];
+  if (!rec) return null;
+  if ((Date.parse(rec.expires || '') || 0) <= Date.now()) {
+    delete db.oauth_states[state];
+    save();
+    return null;
+  }
+  return rec;
+}
+
+function takeOauthState(state) {
+  const rec = peekOauthState(state);
+  if (!rec) return null;
+  delete db.oauth_states[state];
+  save();
+  return rec;
+}
+
+function googleRedirectUri(origin) {
+  return origin + '/api/auth/google/callback';
+}
+
+function googleAuthorizeUrl(state, origin) {
+  const p = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: googleRedirectUri(origin),
+    response_type: 'code',
+    scope: 'openid email profile',
+    state,
+    prompt: 'select_account'
+  });
+  return GOOGLE_AUTH_URL + '?' + p.toString();
+}
+
+function decodeJwtPayload(jwt) {
+  const parts = String(jwt || '').split('.');
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')); }
+  catch { return null; }
+}
+
+// Production path: authorization-code exchange straight to Google over TLS. The
+// id_token comes back on that direct server to server response, so its contents
+// are trusted without a JWKS check; email_verified is still required.
+async function googleProfileFromCode(code, origin) {
+  const body = new URLSearchParams({
+    code,
+    client_id: GOOGLE_CLIENT_ID,
+    client_secret: GOOGLE_CLIENT_SECRET,
+    redirect_uri: googleRedirectUri(origin),
+    grant_type: 'authorization_code'
+  });
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(502, 'Google sign-in did not go through. Please try again or use your email.');
+  }
+  const claims = decodeJwtPayload(json.id_token);
+  const verified = claims && (claims.email_verified === true || claims.email_verified === 'true');
+  if (!claims || !isEmail(claims.email) || !verified) {
+    throw new ApiError(401, 'Google could not confirm that email address. Please try another way in.');
+  }
+  return { email: String(claims.email).toLowerCase(), name: cleanStr(claims.name, 100) || null };
+}
+
+// One account per email. A Google sign-in for an existing client signs into that
+// same client and leaves the password (and everything else) intact.
+function upsertGoogleClient(email, name) {
+  let client = findClientByEmail(email);
+  if (!client) {
+    client = makeClient(email, name || null, null, ADMIN_EMAILS.includes(email), {
+      auth_provider: 'google', google_linked: true
+    });
+  } else {
+    if (!client.name && name) client.name = name;
+    client.google_linked = true;
+  }
+  return client;
 }
 
 /* ---------------- availability ---------------------------------------------- */
@@ -429,6 +764,21 @@ function sweepExpiredDeposits() {
   if (changed) save();
 }
 
+// Housekeeping for expired sessions and OAuth states. Sessions are also checked
+// on every authenticated request; this just keeps db.json from growing.
+function sweepExpiredSessions() {
+  if (!db) return;
+  const now = Date.now();
+  let changed = false;
+  for (const [tok, s] of Object.entries(db.sessions)) {
+    const exp = Date.parse(s.expires || '') || 0;
+    if (exp && exp <= now) { delete db.sessions[tok]; changed = true; }
+  }
+  const states = Object.keys(db.oauth_states || {}).length;
+  purgeOauthStates();
+  if (changed || states !== Object.keys(db.oauth_states || {}).length) save();
+}
+
 /* ---------------- API router -------------------------------------------------- */
 
 async function readBody(req) {
@@ -460,6 +810,11 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
+function sendRedirect(res, location) {
+  res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });
+  res.end();
+}
+
 function cleanStr(v, max) {
   if (typeof v !== 'string') return '';
   return v.trim().slice(0, max || 200);
@@ -477,19 +832,145 @@ async function handleApi(req, res, url) {
     sweepExpiredDeposits();
   }
 
-  /* -- auth -- */
+  /* -- auth: password -- */
+  if (method === 'POST' && p === '/api/auth/signup') {
+    const body = await readBody(req);
+    const email = cleanStr(body.email, 200).toLowerCase();
+    if (!isEmail(email)) throw new ApiError(400, 'Enter a valid email address');
+    const ip = clientIp(req);
+    if (rateLimitHit('signup-ip:' + ip, LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS)) {
+      throw new ApiError(429, 'Too many sign-up attempts. Please wait about ' +
+        waitMinutes(['signup-ip:' + ip], LOGIN_WINDOW_MS) + ' and try again.');
+    }
+    const password = typeof body.password === 'string' ? body.password : '';
+    assertPasswordOk(password, email);
+    if (findClientByEmail(email)) {
+      // Same message whether or not that account has a password: point them at
+      // signing in and say nothing more.
+      throw new ApiError(409, 'That email already has an account. Please sign in, or use a sign-in code to set a new password.');
+    }
+    const client = makeClient(email, cleanStr(body.name, 100) || null, cleanStr(body.phone, 30) || null,
+      ADMIN_EMAILS.includes(email), { password_hash: await hashPassword(password), auth_provider: 'password' });
+    const token = startSession(client, 'password');
+    save();
+    return sendJson(res, 200, { token, client: publicClient(client) });
+  }
+
+  if (method === 'POST' && p === '/api/auth/login') {
+    const body = await readBody(req);
+    const email = cleanStr(body.email, 200).toLowerCase();
+    const password = typeof body.password === 'string' ? body.password : '';
+    const ip = clientIp(req);
+    const emailKey = 'login-email:' + email;
+    const ipKey = 'login-ip:' + ip;
+    if (isRateLimited(emailKey, LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS) ||
+        isRateLimited(ipKey, LOGIN_MAX_FAILURES, LOGIN_WINDOW_MS)) {
+      throw new ApiError(429, 'Too many sign-in attempts. Please wait about ' +
+        waitMinutes([emailKey, ipKey], LOGIN_WINDOW_MS) +
+        ' and try again, or sign in with an email code instead.');
+    }
+    // One message for a wrong password and for an email with no account, so this
+    // endpoint never tells an attacker which emails are real.
+    const wrong = 'That email and password do not match. Please try again.';
+    if (!isEmail(email) || !password) {
+      recordFailure(emailKey, LOGIN_WINDOW_MS);
+      recordFailure(ipKey, LOGIN_WINDOW_MS);
+      throw new ApiError(401, wrong);
+    }
+    const client = findClientByEmail(email);
+    if (!client) {
+      await verifyPassword(password, DECOY_HASH); // keep the timing identical
+      recordFailure(emailKey, LOGIN_WINDOW_MS);
+      recordFailure(ipKey, LOGIN_WINDOW_MS);
+      throw new ApiError(401, wrong);
+    }
+    if (!client.password_hash) {
+      // Older account made by email code only. Not a bad guess, so it does not
+      // count against the rate limit.
+      throw new ApiError(409,
+        'This account does not have a password yet. Sign in with an email code, then set one.',
+        { needs_password_setup: true });
+    }
+    if (!(await verifyPassword(password, client.password_hash))) {
+      recordFailure(emailKey, LOGIN_WINDOW_MS);
+      recordFailure(ipKey, LOGIN_WINDOW_MS);
+      throw new ApiError(401, wrong);
+    }
+    const token = startSession(client, 'password');
+    save();
+    return sendJson(res, 200, { token, client: publicClient(client) });
+  }
+
+  if (method === 'POST' && p === '/api/auth/set-password') {
+    const client = requireAuth(req);
+    const body = await readBody(req);
+    const password = typeof body.password === 'string' ? body.password : '';
+    assertPasswordOk(password, client.email);
+    client.password_hash = await hashPassword(password);
+    client.auth_provider = 'password';
+    // Rotate: every session for this client is dropped and a fresh token issued,
+    // so an old token cannot outlive a password change.
+    endAllSessionsFor(client.id);
+    const token = startSession(client, 'password');
+    save();
+    return sendJson(res, 200, { client: publicClient(client), token });
+  }
+
+  if (method === 'POST' && p === '/api/auth/logout') {
+    requireAuth(req);
+    endSession(bearerToken(req));
+    return sendJson(res, 200, { ok: true });
+  }
+
+  /* -- auth: google -- */
+  if (method === 'GET' && p === '/api/auth/google/start') {
+    const redirect = safeRedirect(url.searchParams.get('redirect'));
+    const state = createOauthState(redirect);
+    if (googleConfigured()) return sendRedirect(res, googleAuthorizeUrl(state, origin));
+    return sendRedirect(res, '/demo-google?state=' + encodeURIComponent(state) +
+      '&redirect=' + encodeURIComponent(redirect));
+  }
+
+  if (method === 'GET' && p === '/api/auth/google/callback') {
+    const state = cleanStr(url.searchParams.get('state'), 100);
+    const rec = takeOauthState(state);
+    if (!rec) throw new ApiError(400, 'That sign-in link expired. Please start again.');
+    if (url.searchParams.get('error')) {
+      throw new ApiError(401, 'Google sign-in was cancelled. You can try again or use your email.');
+    }
+    let profile;
+    if (googleConfigured()) {
+      const code = cleanStr(url.searchParams.get('code'), 500);
+      if (!code) throw new ApiError(400, 'Google did not send a sign-in code. Please try again.');
+      profile = await googleProfileFromCode(code, origin);
+    } else {
+      // Demo stand-in for the code exchange: the chooser page posts the picked
+      // address back here. Disabled the moment real credentials exist.
+      const email = cleanStr(url.searchParams.get('demo_email'), 200).toLowerCase();
+      if (!isEmail(email)) throw new ApiError(400, 'Enter a valid email address');
+      profile = { email, name: cleanStr(url.searchParams.get('demo_name'), 100) || null };
+    }
+    const client = upsertGoogleClient(profile.email, profile.name);
+    const token = startSession(client, 'google');
+    save();
+    return sendRedirect(res, rec.redirect + '#sp_token=' + token);
+  }
+
+  /* -- auth: email code -- */
   if (method === 'POST' && p === '/api/auth/request-code') {
     const body = await readBody(req);
     const email = cleanStr(body.email, 200).toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, 'Enter a valid email address');
-    const ip = req.socket.remoteAddress || 'unknown';
+    if (!isEmail(email)) throw new ApiError(400, 'Enter a valid email address');
+    const ip = clientIp(req);
     if (rateLimitHit('ip:' + ip) || rateLimitHit('email:' + email)) {
       throw new ApiError(429, 'Too many code requests. Please wait about 15 minutes and try again.');
     }
+    // purpose only changes the wording of the message. Same code, same rules.
+    const purpose = cleanStr(body.purpose, 20).toLowerCase() === 'reset' ? 'reset' : 'login';
     const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     db.codes[email] = { hash: hashCode(code), expires: Date.now() + CODE_TTL_MS, attempts: 0 };
     const existing = findClientByEmail(email);
-    notify('login_code',
+    notify(purpose === 'reset' ? 'reset_code' : 'login_code',
       { email, phone: existing && existing.phone, name: existing && existing.name },
       { code });
     save();
@@ -512,9 +993,8 @@ async function handleApi(req, res, url) {
     delete db.codes[email];
     let client = findClientByEmail(email);
     if (!client) client = makeClient(email, null, null, ADMIN_EMAILS.includes(email));
-    client.is_admin = ADMIN_EMAILS.includes(email);
-    const token = crypto.randomBytes(16).toString('hex');
-    db.sessions[token] = { client_id: client.id, created_at: new Date().toISOString() };
+    // Code sign-in never touches an existing password.
+    const token = startSession(client, 'code');
     save();
     return sendJson(res, 200, { token, client: publicClient(client) });
   }
@@ -777,6 +1257,7 @@ async function handleApi(req, res, url) {
 
   if (DEMO && method === 'POST' && p === '/api/_reset') {
     seedDemo();
+    rateBuckets.clear(); // demo resets also clear rate-limit counters
     saveNow();
     return sendJson(res, 200, { ok: true });
   }
@@ -899,6 +1380,126 @@ function demoCheckoutPage(res, reqUrl) {
   res.end(html);
 }
 
+/* ---------------- demo google account chooser ---------------------------------- */
+
+// Stand-in for Google's consent screen while there are no Google credentials.
+// It is clearly labelled as a demo, and it is switched off automatically the
+// moment GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set.
+const DEMO_GOOGLE_ACCOUNTS = [
+  { name: 'Ariel Monroe', email: 'ariel.monroe@demo.gmail.com', initial: 'A' },
+  { name: 'Jordan Pike', email: 'jordan.pike@demo.gmail.com', initial: 'J' },
+  { name: 'Tasha Reeves', email: 'tasha@demo.local', initial: 'T', note: 'already a Sitting Pretty client' }
+];
+
+// Pulls the shared tokens so this page moves with the rest of the site.
+const GOOGLE_CSS = `
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font-body);background:var(--bg);color:var(--ink);font-weight:500;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;line-height:1.6}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+    max-width:440px;width:100%;padding:28px 24px;box-shadow:var(--shadow-lift)}
+  .brand{font-family:var(--font-script);font-size:1.5rem;color:var(--rose);margin-bottom:14px}
+  .banner{background:var(--rose-soft);color:var(--rose-deep);font-weight:700;font-size:.8rem;
+    letter-spacing:.04em;text-transform:uppercase;border-radius:var(--r-pill);
+    padding:9px 14px;margin-bottom:20px;text-align:center}
+  h1{font-size:1.25rem;font-weight:900;line-height:1.25;margin-bottom:6px}
+  .sub{color:var(--ink-dim);font-size:.92rem;margin-bottom:20px}
+  .acct{display:flex;align-items:center;gap:12px;width:100%;text-align:left;text-decoration:none;
+    background:transparent;border:1px solid var(--line);border-radius:var(--r-card);
+    padding:12px 14px;margin-bottom:10px;color:var(--ink);cursor:pointer;
+    transition:border-color .2s var(--ease-out), background .2s var(--ease-out)}
+  .acct:hover{border-color:var(--rose);background:var(--surface-2)}
+  .avatar{width:40px;height:40px;border-radius:50%;background:var(--rose-soft);color:var(--rose-deep);
+    display:flex;align-items:center;justify-content:center;font-weight:900;flex:0 0 auto}
+  .acct .who{font-weight:700;font-size:.98rem}
+  .acct .addr{color:var(--ink-dim);font-size:.85rem;word-break:break-all}
+  .acct .note{color:var(--rose-deep);font-size:.78rem;font-weight:700}
+  .divider{display:flex;align-items:center;gap:12px;color:var(--ink-faint);font-size:.8rem;
+    margin:18px 0 14px}
+  .divider::before,.divider::after{content:"";height:1px;background:var(--line);flex:1}
+  label{display:block;font-size:.85rem;font-weight:700;color:var(--ink-dim);margin-bottom:6px}
+  input{width:100%;font-family:var(--font-body);font-size:1rem;color:var(--ink);
+    background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-pill);
+    padding:12px 16px;min-height:48px;margin-bottom:12px}
+  input:focus{outline:2px solid var(--rose);outline-offset:1px}
+  .btn-solid{width:100%}
+  .back{display:block;text-align:center;margin-top:16px;color:var(--ink-dim);font-size:.9rem;
+    text-decoration:none}
+  .back:hover{color:var(--rose)}
+  .foot{color:var(--ink-faint);font-size:.78rem;text-align:center;margin-top:14px}
+`;
+
+function demoGooglePage(res, reqUrl) {
+  const state = cleanStr(reqUrl.searchParams.get('state'), 100);
+  const valid = /^[a-f0-9]{16,100}$/.test(state) && peekOauthState(state);
+
+  let inner;
+  if (googleConfigured()) {
+    inner = `
+      <h1>Google is live on this server</h1>
+      <p class="sub">Real Google credentials are set, so this demo chooser is turned off.
+      Start again from the Sitting Pretty sign-in screen.</p>
+      <a class="back" href="/">Back to Sitting Pretty</a>`;
+  } else if (!valid) {
+    inner = `
+      <h1>This sign-in link expired</h1>
+      <p class="sub">Sign-in links are good for 10 minutes. Please start again from the
+      Sitting Pretty sign-in screen.</p>
+      <a class="back" href="/">Back to Sitting Pretty</a>`;
+  } else {
+    const s = encodeURIComponent(state);
+    const rows = DEMO_GOOGLE_ACCOUNTS.map((a) => `
+      <a class="acct" href="/api/auth/google/callback?state=${s}&demo_email=${encodeURIComponent(a.email)}&demo_name=${encodeURIComponent(a.name)}">
+        <span class="avatar">${escapeHtml(a.initial)}</span>
+        <span>
+          <span class="who">${escapeHtml(a.name)}</span><br>
+          <span class="addr">${escapeHtml(a.email)}</span>
+          ${a.note ? '<br><span class="note">' + escapeHtml(a.note) + '</span>' : ''}
+        </span>
+      </a>`).join('');
+    inner = `
+      <h1>Choose an account</h1>
+      <p class="sub">This is a practice version of the Google sign-in screen. These accounts
+      are made up for the demo, and no Google account is contacted.</p>
+      ${rows}
+      <div class="divider">or use another email</div>
+      <form method="GET" action="/api/auth/google/callback">
+        <input type="hidden" name="state" value="${escapeHtml(state)}">
+        <label for="demo_email">Email address</label>
+        <input id="demo_email" name="demo_email" type="email" required
+          placeholder="you@example.com" autocomplete="email">
+        <button class="btn btn-solid" type="submit">Continue</button>
+      </form>
+      <a class="back" href="/">Back to Sitting Pretty</a>
+      <p class="foot">When Ke'Ebonie is ready, real Google credentials replace this page
+      and nothing else changes.</p>`;
+  }
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Demo Google sign-in | Sitting Pretty</title>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@500,700,900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playball&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/tokens.css">
+<style>${GOOGLE_CSS}</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Sitting Pretty</div>
+    <div class="banner">Demo sign-in, not real Google</div>
+    ${inner}
+  </div>
+</body>
+</html>`;
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(html);
+}
+
 /* ---------------- static files ------------------------------------------------ */
 
 const MIME = {
@@ -1007,6 +1608,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/demo-checkout' && (req.method === 'GET' || req.method === 'HEAD')) {
       return demoCheckoutPage(res, url);
     }
+    if (url.pathname === '/demo-google' && (req.method === 'GET' || req.method === 'HEAD')) {
+      return demoGooglePage(res, url);
+    }
     if (req.method === 'GET' || req.method === 'HEAD') {
       return serveStatic(req, res, url);
     }
@@ -1016,14 +1620,19 @@ const server = http.createServer(async (req, res) => {
     const status = err instanceof ApiError ? err.status : 500;
     const message = err instanceof ApiError ? err.message : 'Server error';
     if (status === 500) console.error('[server]', req.method, url.pathname, err);
-    if (!res.headersSent) sendJson(res, status, { error: message });
+    const extra = (err instanceof ApiError && err.extra) || null;
+    if (!res.headersSent) sendJson(res, status, { error: message, ...(extra || {}) });
     else res.end();
   }
 });
 
 loadDb();
 sweepExpiredDeposits();
-const sweepTimer = setInterval(sweepExpiredDeposits, SWEEP_INTERVAL_MS);
+sweepExpiredSessions();
+const sweepTimer = setInterval(() => {
+  sweepExpiredDeposits();
+  sweepExpiredSessions();
+}, SWEEP_INTERVAL_MS);
 if (sweepTimer.unref) sweepTimer.unref();
 
 // Local demo: loopback only, never exposed to the network.
@@ -1035,6 +1644,9 @@ server.listen(PORT, '127.0.0.1', () => {
   else console.log('  Demo helpers: OFF (DEMO=0)');
   console.log('  Admin:     ' + ADMIN_EMAILS.join(', '));
   console.log('  Payments:  ' + (STRIPE_KEY ? 'Stripe (real Checkout sessions)' : 'demo mode (/demo-checkout)'));
+  console.log('  Google:    ' + (googleConfigured()
+    ? 'real OAuth (GOOGLE_CLIENT_ID set)'
+    : 'demo chooser (/demo-google)'));
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

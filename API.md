@@ -15,10 +15,50 @@ Deposit parsing from the service note (4th field):
 - otherwise → deposit null (booking is request-only, no payment step)
 
 ## Auth
-- `POST /api/auth/request-code` `{email}` → `{ok:true}` — creates 6-digit code,
-  10-min expiry, delivers via email (demo: visible in outbox).
-- `POST /api/auth/verify` `{email, code}` → `{token, client:{id,email,name,phone,is_admin}}`
-  — creates the client record on first login. Token is opaque, server-side session.
+
+Three ways in, all landing on the same `{token, client}` shape. Sessions are
+long-lived (90 days, sliding: touched on each authenticated request) so repeat
+clients stay signed in and never need a code for routine booking.
+
+`client` object: `{id, email, name, phone, is_admin, has_password, auth_provider}`
+where `auth_provider` ∈ `password | google | code`.
+
+**Password (primary)**
+- `POST /api/auth/signup` `{email, password, name?, phone?}` → `{token, client}`
+  - password rules: min 8 chars, not a known-trivial value; server stores
+    scrypt hash + per-user salt, never the password.
+  - if the email already has an account: 409 `{error}` with a message pointing
+    at log-in or password reset. Never reveal more than that.
+- `POST /api/auth/login` `{email, password}` → `{token, client}`
+  - wrong password OR unknown email both return the same 401 message
+    (no account enumeration). Rate limited: 8 attempts / 15 min per email+IP,
+    then 429 with a wait message.
+  - if the account exists but has no password yet (created by an older code
+    login), respond 409 `{error, needs_password_setup:true}` so the UI can
+    route them through the code flow once and set a password.
+
+**Google**
+- `GET /api/auth/google/start?redirect=<path>` → 302 to Google's consent screen
+  (production). Demo mock: 302 to `/demo-google?redirect=…`, a clearly-labeled
+  fake account chooser so the flow is clickable without Google credentials.
+- `GET /api/auth/google/callback?code=…&state=…` → validates state, exchanges the
+  code, upserts the client by verified email, then 302s back to
+  `<redirect>#sp_token=<token>` for the frontend to store.
+- Account linking: a Google sign-in whose email matches an existing account
+  signs into THAT account (email is verified by Google, so this is safe) and
+  leaves any existing password intact.
+
+**Email code (fallback + password reset)**
+- `POST /api/auth/request-code` `{email, purpose?}` → `{ok:true}` — 6-digit code,
+  10-min expiry, 5 attempts, rate limited. `purpose` ∈ `login | reset`.
+- `POST /api/auth/verify` `{email, code}` → `{token, client}` — creates the
+  client on first login.
+- `POST /api/auth/set-password` (auth) `{password}` → `{client}` — sets or
+  replaces the password for the signed-in client. This is the last step of a
+  reset and the "add a password" path for code-only accounts.
+
+**Session**
+- `POST /api/auth/logout` (auth) → `{ok:true}` — invalidates the current token.
 - `GET /api/me` (auth) → `{client, bookings:[Booking]}` (their bookings, newest first)
 - `POST /api/me` (auth) `{name?, phone?}` → `{client}` — update profile.
 

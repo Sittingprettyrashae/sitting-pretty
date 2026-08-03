@@ -74,6 +74,24 @@ main{max-width:680px;margin:0 auto;padding:0 1rem 6rem}
   font-size:.83rem;color:var(--ink-faint);
 }
 .login-hint code{font-family:ui-monospace,monospace;font-size:.8rem;background:var(--surface-2);padding:.1rem .35rem;border-radius:.35rem}
+.login-note{color:var(--ink-dim);font-size:.9rem;line-height:1.5;margin-bottom:.2rem}
+.btn-google{width:100%;justify-content:center}
+.or-line{display:flex;align-items:center;gap:.75rem;margin:.95rem 0;color:var(--ink-faint);font-size:.8rem}
+.or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}
+.pw-wrap{position:relative;display:flex}
+.pw-wrap .field{padding-right:4.6rem}
+.pw-toggle{
+  position:absolute;right:.5rem;top:50%;transform:translateY(-50%);
+  border:none;background:none;font-family:inherit;font-size:.82rem;font-weight:700;
+  color:var(--rose);cursor:pointer;padding:.4rem .5rem;border-radius:.6rem;
+}
+.pw-toggle:hover{background:var(--rose-soft)}
+.field-hint{font-size:.79rem;color:var(--ink-faint)}
+.alt-links{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;margin-top:.9rem;font-size:.86rem;color:var(--ink-faint)}
+.alt-links button{
+  border:none;background:none;font-family:inherit;font-size:.86rem;font-weight:700;
+  color:var(--rose);cursor:pointer;padding:.35rem 0;text-decoration:underline;text-underline-offset:2px;
+}
 
 /* ---------- fields ---------- */
 .field-label{font-size:.8rem;font-weight:700;color:var(--ink-dim);letter-spacing:.02em}
@@ -369,19 +387,51 @@ button.cal-day:hover{border-color:var(--rose)}
   <section id="login-view" hidden>
     <div class="login-card">
       <h1>Owner sign in</h1>
-      <p class="login-sub">We will email you a 6-digit code. No password needed.</p>
-      <form id="email-form">
-        <label class="field-label" for="login-email">Email</label>
-        <input id="login-email" class="field" type="email" required autocomplete="email" placeholder="you@example.com">
-        <button id="email-submit" class="btn btn-solid btn-wide" type="submit">Send my code</button>
-      </form>
+      <p class="login-sub">Sign in with Google or your password. You stay signed in on this phone, so this is a one-time step.</p>
+
+      <div id="pane-password">
+        <button id="google-btn" class="btn btn-ghost btn-google" type="button">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7.2" stroke="currentColor" stroke-width="1.6"/><path d="M12.4 9a3.4 3.4 0 1 1-1-2.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.4 9H9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span>Continue with Google</span>
+        </button>
+        <div class="or-line"><span>or</span></div>
+        <form id="password-form">
+          <label class="field-label" for="login-email">Email</label>
+          <input id="login-email" class="field" type="email" required autocomplete="email" placeholder="you@example.com">
+          <label class="field-label" for="login-password">Password</label>
+          <div class="pw-wrap">
+            <input id="login-password" class="field" type="password" autocomplete="current-password" placeholder="Your password">
+            <button type="button" class="pw-toggle" data-pw="login-password" aria-pressed="false" aria-label="Show password">Show</button>
+          </div>
+          <button id="password-submit" class="btn btn-solid btn-wide" type="submit">Sign in</button>
+        </form>
+        <p class="alt-links">
+          <button id="forgot-btn" type="button">Forgot password</button>
+          <span aria-hidden="true">·</span>
+          <button id="code-instead-btn" type="button">Email me a code instead</button>
+        </p>
+      </div>
+
       <form id="code-form" hidden>
-        <p id="code-sent-line" class="login-sub"></p>
+        <p id="code-sent-line" class="login-note"></p>
         <label class="field-label" for="login-code">6-digit code</label>
         <input id="login-code" class="field field-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" placeholder="000000">
         <button id="code-submit" class="btn btn-solid btn-wide" type="submit">Sign in</button>
-        <button id="change-email-btn" class="btn btn-ghost btn-wide" type="button">Use a different email</button>
+        <button id="change-email-btn" class="btn btn-ghost btn-wide" type="button">Back to password sign in</button>
       </form>
+
+      <form id="setpw-form" hidden>
+        <p class="login-note">Want one-tap sign in next time? Set a password. You can skip this.</p>
+        <label class="field-label" for="new-password">New password</label>
+        <div class="pw-wrap">
+          <input id="new-password" class="field" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+          <button type="button" class="pw-toggle" data-pw="new-password" aria-pressed="false" aria-label="Show password">Show</button>
+        </div>
+        <p class="field-hint" id="setpw-hint"></p>
+        <button id="setpw-submit" class="btn btn-solid btn-wide" type="submit">Save password</button>
+        <button id="setpw-skip" class="btn btn-ghost btn-wide" type="button">Not now</button>
+      </form>
+
       <p id="login-error" class="login-error" role="alert" hidden></p>
       <p class="login-hint" id="demo-login-hint" hidden>Demo: the admin account is <strong>ebony@demo.local</strong>. Your code shows up in the Demo outbox, also at <code>/api/_outbox</code>.</p>
     </div>

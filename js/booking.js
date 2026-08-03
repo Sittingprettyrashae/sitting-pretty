@@ -136,7 +136,35 @@
 
   // ---------- sheet machine ----------
   const sheet = $("#sheet");
-  const S = { mode: null, steps: [], idx: 0, service: null, date: null, time: null, notes: "", email: "", pendingProfile: false };
+  const S = {
+    mode: null, steps: [], idx: 0, service: null, date: null, time: null, notes: "", email: "",
+    pendingProfile: false,
+    authTab: "login",        // "login" | "signup"
+    authStage: "form",       // "form" | "code"
+    codePurpose: "login",    // "login" | "reset"
+    codeNote: "",            // one plain sentence explaining why we sent a code
+    offerPassword: false,    // invite (never force) a password after a code login
+  };
+
+  // The Google sign-in is a full page trip, so anything the client already
+  // picked has to survive the round trip.
+  const PENDING_KEY = "sp_pending_booking";
+  function stashPending() {
+    try {
+      sessionStorage.setItem(PENDING_KEY, JSON.stringify({
+        mode: S.mode,
+        service_id: S.service ? S.service.service_id : null,
+        date: S.date, time: S.time, notes: S.notes,
+      }));
+    } catch (e) {}
+  }
+  function takePending() {
+    try {
+      const raw = sessionStorage.getItem(PENDING_KEY);
+      sessionStorage.removeItem(PENDING_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
 
   // Bumped on every render and whenever the sheet closes so in-flight requests
   // can tell their step is gone and quietly drop their response.
@@ -181,36 +209,50 @@
     if (payBtn) { onFinishPaying(payBtn); return; }
   });
 
+  // Signed in with a usable profile: no account step at all, so a returning
+  // client goes day/time straight to review.
+  const ready = () => !!(me && me.client && me.client.name && !S.pendingProfile && !S.offerPassword);
+
   function setSteps() {
     S.steps = [];
     if (S.mode === "book") {
       if (!S.service) S.steps.push("service");
-      S.steps.push("when", "who", "review");
+      S.steps.push("when");
+      if (!ready()) S.steps.push("who");
+      S.steps.push("review");
     } else if (S.mode === "mybookings") {
-      if (!me) S.steps.push("who");
+      if (!ready()) S.steps.push("who");
       S.steps.push("list");
     }
   }
+  // Log in is the default every time the account step opens fresh: most people
+  // arriving here already have an account.
+  // Closing the sheet on the password invitation counts as "not now", so a
+  // fresh open never nags about it again.
+  function resetAuthUi() { S.authTab = "login"; S.authStage = "form"; S.codeNote = ""; S.codePurpose = "login"; S.offerPassword = false; }
   function openBooking(serviceId) {
     if (offline) { window.location.href = serviceId ? smsFor(findService(serviceId)?.name || "an appointment") : `sms:${PHONE}`; return; }
     S.mode = "book"; S.service = serviceId ? findService(serviceId) : null;
     S.date = null; S.time = null; S.notes = ""; S.idx = 0;
+    resetAuthUi();
     setSteps(); openSheet(); render();
   }
   async function openMyBookings() {
     if (offline) { window.location.href = `sms:${PHONE}`; return; }
     S.mode = "mybookings"; S.idx = 0;
-    if (SP.hasToken() && !me) { try { me = await SP.me(); } catch (e) {} }
+    resetAuthUi();
+    if (SP.hasToken() && !me) { try { me = await SP.me(); syncNav(); } catch (e) {} }
     setSteps(); openSheet(); render();
   }
 
   const TITLES = { service: "Pick your style", when: "Pick your day & time", who: "Your info", review: "Confirm your booking", list: "My bookings", done: "" };
+  const titleFor = (step) => step === "who" && !(me && me.client) ? "Your account" : TITLES[step];
 
   function render(doneCfg) {
     opSeq++;
     const step = doneCfg ? "done" : S.steps[S.idx];
     const title = $("#sheetTitle");
-    title.textContent = doneCfg ? (doneCfg.title || "All set") : TITLES[step];
+    title.textContent = doneCfg ? (doneCfg.title || "All set") : titleFor(step);
     $("#sheetBack").style.visibility = (S.idx === 0 || doneCfg) ? "hidden" : "visible";
     const dots = $("#sheetDots");
     dots.innerHTML = (S.mode === "book" && !doneCfg) ? S.steps.map((_, i) => `<i class="${i <= S.idx ? "on" : ""}"></i>`).join("") : "";
@@ -304,56 +346,236 @@
     if (S.date) { const pre = strip.querySelector(`[data-date="${S.date}"]`); if (pre) { pre.classList.add("sel"); loadDay(S.date); } }
   }
 
-  // ----- step: who (login / profile) -----
+  // ----- step: who (account) -----
+  // Three ways in: Google, email + password, or a 6-digit code as the fallback.
+  // A password field is never required of anyone; it is only ever offered.
+
+  // A neutral mark, not anyone's brand logo.
+  const GOOGLE_MARK = `<svg class="gmark" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7.2" stroke="currentColor" stroke-width="1.6"/><path d="M12.4 9H9v-.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.4 9a3.4 3.4 0 1 1-1-2.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+
+  const pwField = (id, label, mode) => `
+    <div class="field">
+      <label for="${id}">${esc(label)}</label>
+      <div class="pw-wrap">
+        <input id="${id}" type="password" autocomplete="${mode === "new" ? "new-password" : "current-password"}" placeholder="${mode === "new" ? "At least 8 characters" : "Your password"}">
+        <button type="button" class="pw-toggle" data-pw="${id}" aria-pressed="false" aria-label="Show password">Show</button>
+      </div>
+      ${mode === "new" ? `<p class="field-hint">${esc(SP.PASSWORD_HINT)}</p>` : ""}
+    </div>`;
+
+  // Wire every show/hide toggle inside a freshly rendered container.
+  function wirePwToggles(root) {
+    root.querySelectorAll(".pw-toggle").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const input = root.querySelector("#" + btn.getAttribute("data-pw"));
+        if (!input) return;
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.textContent = show ? "Hide" : "Show";
+        btn.setAttribute("aria-pressed", show ? "true" : "false");
+        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        input.focus();
+      });
+    });
+  }
+
+  // Once we know who they are, keep moving: finish the profile if we still need
+  // it, otherwise drop them on review (booking) or their list.
+  function afterAuth() {
+    const c = me && me.client;
+    if (c && !c.name) S.pendingProfile = true;
+    syncNav();
+    if (S.pendingProfile || S.offerPassword) { setSteps(); S.idx = S.steps.indexOf("who"); render(); return; }
+    setSteps();
+    const target = S.mode === "book" ? "review" : "list";
+    const i = S.steps.indexOf(target);
+    S.idx = i < 0 ? S.steps.length - 1 : i;
+    render();
+  }
+
   function rWho(body, foot) {
     if (me && me.client) return rWhoKnown(body, foot);
-    body.appendChild(el(`<h4>Log in to book</h4>
-      `));
-    body.appendChild(el(`<p style="color:var(--ink-dim);font-size:.92rem;margin-bottom:.9rem">No passwords. We email you a 6-digit code, and your bookings are saved for next time.</p>`));
-    const emailF = el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(S.email)}"></div>`);
-    body.appendChild(emailF);
-    const codeWrap = el(`<div style="display:none"><div class="field"><label for="bkCode">6-digit code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456"></div></div>`);
-    body.appendChild(codeWrap);
-    const send = el(`<button type="button" class="btn btn-solid">Email me a code</button>`);
-    foot.appendChild(send);
-    let stage = "email";
-    send.addEventListener("click", async () => {
-      if (send.disabled) return;
+    if (S.authStage === "code") return rWhoCode(body, foot);
+
+    const signup = S.authTab === "signup";
+    body.appendChild(el(`<p class="lead-note">${signup
+      ? "Make an account once and your next booking is just a couple of taps."
+      : "Welcome back. Sign in and your details are already here."}</p>`));
+
+    const gbtn = el(`<button type="button" class="btn btn-ghost btn-google">${GOOGLE_MARK}<span>Continue with Google</span></button>`);
+    body.appendChild(gbtn);
+    body.appendChild(el(`<div class="or-line"><span>or</span></div>`));
+
+    const tabs = el(`
+      <div class="seg" role="tablist" aria-label="Email sign in">
+        <button type="button" role="tab" data-tab="login" aria-selected="${signup ? "false" : "true"}">Log in</button>
+        <button type="button" role="tab" data-tab="signup" aria-selected="${signup ? "true" : "false"}">Create account</button>
+      </div>`);
+    body.appendChild(tabs);
+
+    const form = el(`<div></div>`);
+    form.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(S.email)}"></div>`));
+    form.appendChild(el(pwField("bkPw", "Password", signup ? "new" : "current")));
+    if (signup) {
+      form.appendChild(el(`<div class="field"><label for="bkName">Your name</label><input id="bkName" autocomplete="name" placeholder="First and last"></div>`));
+      form.appendChild(el(`<div class="field"><label for="bkPhone">Cell number</label><input id="bkPhone" type="tel" autocomplete="tel" placeholder="(555) 555-5555"><p class="field-hint">Ebony texts you about your appointment. Nothing else.</p></div>`));
+    }
+    body.appendChild(form);
+
+    const links = el(`<p class="alt-links">
+      ${signup ? "" : `<button type="button" data-alt="forgot">Forgot password</button><span aria-hidden="true">·</span>`}
+      <button type="button" data-alt="code">Email me a code instead</button>
+    </p>`);
+    body.appendChild(links);
+    wirePwToggles(body);
+
+    const go = el(`<button type="button" class="btn btn-solid">${signup ? "Create account" : "Log in"}</button>`);
+    foot.appendChild(go);
+
+    tabs.addEventListener("click", e => {
+      const t = e.target.closest("[data-tab]");
+      if (!t) return;
+      const tab = t.getAttribute("data-tab");
+      if (tab === S.authTab) return;
+      S.email = ($("#bkEmail", body) || { value: "" }).value.trim();
+      S.authTab = tab; render();
+    });
+
+    gbtn.addEventListener("click", () => { stashPending(); SP.loginWithGoogle(); });
+
+    links.addEventListener("click", e => {
+      const a = e.target.closest("[data-alt]");
+      if (!a) return;
+      const email = ($("#bkEmail", body).value || "").trim().toLowerCase();
+      const forgot = a.getAttribute("data-alt") === "forgot";
+      S.codePurpose = forgot ? "reset" : "login";
+      S.codeNote = forgot
+        ? "No problem. We will email you a code, then you can set a new password."
+        : "We will email you a 6-digit code. No password needed.";
+      startCode(email, foot);
+    });
+
+    go.addEventListener("click", async () => {
+      if (go.disabled) return;
       const email = $("#bkEmail", body).value.trim().toLowerCase();
-      if (stage === "email") {
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return msg(foot, "That email doesn't look right.", true);
-        send.disabled = true; msg(foot, "Sending your code...");
+      const pw = $("#bkPw", body).value;
+      if (!SP.emailLooksOk(email)) return msg(foot, "That email does not look right. Check it and try again.", true);
+      S.email = email;
+      if (signup) {
+        const pwBad = SP.passwordProblem(pw);
+        if (pwBad) return msg(foot, pwBad, true);
+        const name = $("#bkName", body).value.trim();
+        if (name.length < 2) return msg(foot, "Tell us your name so Ebony knows who is coming.", true);
+        const phone = $("#bkPhone", body).value.trim();
+        go.disabled = true; msg(foot, "Making your account...");
         const seq = opSeq;
         try {
-          await SP.requestCode(email);
-          if (stale(seq)) return;
-          S.email = email; stage = "code";
-          codeWrap.style.display = ""; $("#bkCode", body).focus();
-          send.textContent = "Log in";
-          msg(foot, demoMode ? "Demo mode: your code is in the demo outbox (bottom left)." : "Check your email for the code.");
-          if (demoMode) { try {
-            const ob = await SP.request("/api/_outbox");
-            if (stale(seq)) return;
-            const m = ob.messages.find(x => x.to === email && /code/i.test(x.subject || ""));
-            const code = m && (m.body.match(/\b(\d{6})\b/) || [])[1];
-            if (code) msg(foot, "Demo mode: your code is " + code);
-          } catch (e) {} }
-        } catch (e) { if (stale(seq)) return; msg(foot, e.message, true); }
-        send.disabled = false;
-      } else {
-        const code = $("#bkCode", body).value.trim();
-        if (code.length !== 6) return msg(foot, "Enter the 6-digit code.", true);
-        send.disabled = true; msg(foot, "Checking...");
-        const seq = opSeq;
-        try {
-          const data = await SP.verify(S.email, code);
+          await SP.signup(email, pw, name, phone);
           const fresh = await SP.me();
           if (stale(seq)) return;
-          me = fresh;
-          if (!data.client.name) { S.pendingProfile = true; }
-          render();
-        } catch (e) { if (stale(seq)) return; msg(foot, e.message, true); send.disabled = false; }
+          me = fresh; S.offerPassword = false;
+          afterAuth();
+        } catch (e) {
+          if (stale(seq)) return;
+          msg(foot, e.message, true); go.disabled = false;
+        }
+        return;
       }
+      if (!pw) return msg(foot, "Enter your password, or use the code option below.", true);
+      go.disabled = true; msg(foot, "Signing you in...");
+      const seq = opSeq;
+      try {
+        await SP.login(email, pw);
+        const fresh = await SP.me();
+        if (stale(seq)) return;
+        me = fresh; S.offerPassword = false;
+        afterAuth();
+      } catch (e) {
+        if (stale(seq)) return;
+        if (e.needsPasswordSetup) {
+          S.codePurpose = "reset";
+          S.codeNote = "This account was made before we had passwords, so we will email you a code this once and then you can set one.";
+          startCode(email, foot);
+          return;
+        }
+        msg(foot, e.message, true); go.disabled = false;
+      }
+    });
+  }
+
+  // Send the code, then swap the step over to the code form.
+  let codeInFlight = false;
+  async function startCode(email, foot) {
+    if (codeInFlight) return;
+    if (!SP.emailLooksOk(email)) { S.authStage = "code"; S.email = email; render(); return; }
+    codeInFlight = true;
+    msg(foot, "Sending your code...");
+    const seq = opSeq;
+    try {
+      await SP.requestCode(email, S.codePurpose);
+      if (stale(seq)) return;
+      S.email = email; S.authStage = "code"; render();
+      showDemoCode(email);
+    } catch (e) {
+      if (stale(seq)) return;
+      msg(foot, e.message, true);
+    } finally { codeInFlight = false; }
+  }
+
+  // Demo convenience only: surface the code the mock server "emailed".
+  async function showDemoCode(email) {
+    if (!demoMode) return;
+    const seq = opSeq;
+    try {
+      const ob = await SP.request("/api/_outbox");
+      if (stale(seq)) return;
+      const m = ob.messages.find(x => x.to === email && /\b\d{6}\b/.test(x.body || ""));
+      const code = m && (m.body.match(/\b(\d{6})\b/) || [])[1];
+      if (code) msg($("#sheetFoot"), "Demo mode: your code is " + code);
+    } catch (e) {}
+  }
+
+  function rWhoCode(body, foot) {
+    body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || "We will email you a 6-digit code.")}</p>`));
+    body.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" autocomplete="email" value="${esc(S.email)}"></div>`));
+    body.appendChild(el(`<div class="field"><label for="bkCode">6-digit code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456"></div>`));
+    const links = el(`<p class="alt-links">
+      <button type="button" data-alt="resend">Send it again</button><span aria-hidden="true">·</span>
+      <button type="button" data-alt="back">Use a password instead</button>
+    </p>`);
+    body.appendChild(links);
+    const go = el(`<button type="button" class="btn btn-solid">Log in</button>`);
+    foot.appendChild(go);
+    msg(foot, demoMode ? "Demo mode: your code shows in the demo outbox." : "Check your email for the code.");
+    const codeInput = $("#bkCode", body);
+    codeInput.focus();
+
+    links.addEventListener("click", e => {
+      const a = e.target.closest("[data-alt]");
+      if (!a) return;
+      if (a.getAttribute("data-alt") === "back") { S.authStage = "form"; S.codeNote = ""; render(); return; }
+      startCode(($("#bkEmail", body).value || "").trim().toLowerCase(), foot);
+    });
+
+    go.addEventListener("click", async () => {
+      if (go.disabled) return;
+      const email = $("#bkEmail", body).value.trim().toLowerCase();
+      const code = codeInput.value.trim();
+      if (!SP.emailLooksOk(email)) return msg(foot, "That email does not look right. Check it and try again.", true);
+      if (code.length !== 6) return msg(foot, "Enter the 6-digit code we emailed you.", true);
+      go.disabled = true; msg(foot, "Checking...");
+      const seq = opSeq;
+      try {
+        const data = await SP.verify(email, code);
+        const fresh = await SP.me();
+        if (stale(seq)) return;
+        me = fresh;
+        S.email = email;
+        S.authStage = "form"; S.codeNote = "";
+        // Invitation, not a requirement: a password makes next time one tap.
+        S.offerPassword = S.codePurpose === "reset" || !(data.client && data.client.has_password);
+        afterAuth();
+      } catch (e) { if (stale(seq)) return; msg(foot, e.message, true); go.disabled = false; }
     });
   }
 
@@ -369,45 +591,90 @@
         <div class="svc-summary"><div><b>${esc(c.name)}</b><span class="m">${esc(c.email)}${c.phone ? " · " + esc(c.phone) : ""}</span></div>
         <button type="button" id="switchAcct" style="background:none;border:none;color:var(--rose);font-weight:700;font-size:.85rem;cursor:pointer;font-family:inherit">Not you?</button></div>`));
     }
-    if (S.mode === "book") {
-      body.appendChild(el(`<div class="field" style="margin-top:1rem"><label for="bkNotes">Anything Ebony should know? (optional)</label><textarea id="bkNotes" rows="2" placeholder="Hair length, inspo, questions...">${esc(S.notes)}</textarea></div>`));
+    if (S.offerPassword) {
+      body.appendChild(el(`<h4>Set a password (optional)</h4>`));
+      body.appendChild(el(`<p class="lead-note">Add one and next time you can sign in with one tap. Skip it and we will keep emailing you a code.</p>`));
+      body.appendChild(el(pwField("bkNewPw", "New password", "new")));
+      wirePwToggles(body);
     }
-    const cont = el(`<button type="button" class="btn btn-solid">Continue</button>`);
+    const cont = el(`<button type="button" class="btn btn-solid">${S.offerPassword ? "Save and continue" : "Continue"}</button>`);
     foot.appendChild(cont);
+    let skip = null;
+    if (S.offerPassword) {
+      skip = el(`<button type="button" class="btn btn-ghost" style="margin-top:.6rem">Not now</button>`);
+      foot.appendChild(skip);
+    }
     const sw = $("#switchAcct", body);
-    if (sw) sw.addEventListener("click", () => { SP.logout(); me = null; S.pendingProfile = false; render(); });
-    cont.addEventListener("click", async () => {
-      if (cont.disabled) return;
+    if (sw) sw.addEventListener("click", async () => {
+      const seq = opSeq;
+      await SP.logout();
+      if (stale(seq)) return;
+      me = null; S.pendingProfile = false; S.offerPassword = false; resetAuthUi(); syncNav();
+      setSteps(); S.idx = S.steps.indexOf("who"); render();
+    });
+
+    async function finish(withPassword) {
+      cont.disabled = true; if (skip) skip.disabled = true;
+      const seq = opSeq;
       if (needProfile) {
         const name = $("#bkName", body).value.trim();
-        if (name.length < 2) return msg(foot, "Tell us your name so Ebony knows who's coming.", true);
+        if (name.length < 2) { cont.disabled = false; if (skip) skip.disabled = false; return msg(foot, "Tell us your name so Ebony knows who is coming.", true); }
         const phone = $("#bkPhone", body).value.trim();
-        cont.disabled = true;
-        const seq = opSeq;
         try {
           const updated = (await SP.updateMe({ name, phone })).client;
           if (stale(seq)) return;
-          me = { ...me, client: updated }; S.pendingProfile = false;
+          me = { ...me, client: updated }; S.pendingProfile = false; syncNav();
+        } catch (e) {
+          if (stale(seq)) return;
+          msg(foot, e.message, true); cont.disabled = false; if (skip) skip.disabled = false; return;
         }
-        catch (e) { if (stale(seq)) return; msg(foot, e.message, true); cont.disabled = false; return; }
       }
-      if (S.mode === "book") { S.notes = ($("#bkNotes", body) || { value: "" }).value.trim(); next(); }
-      else { setSteps(); S.idx = S.steps.length - 1; render(); }
+      if (withPassword) {
+        const pw = $("#bkNewPw", body).value;
+        const bad = SP.passwordProblem(pw);
+        if (bad) { cont.disabled = false; if (skip) skip.disabled = false; return msg(foot, bad, true); }
+        try {
+          const res = await SP.setPassword(pw);
+          if (stale(seq)) return;
+          if (res && res.client) me = { ...me, client: res.client };
+        } catch (e) {
+          if (stale(seq)) return;
+          msg(foot, e.message, true); cont.disabled = false; if (skip) skip.disabled = false; return;
+        }
+      }
+      S.offerPassword = false;
+      setSteps();
+      if (S.mode === "book") {
+        const i = S.steps.indexOf("review");
+        S.idx = i < 0 ? S.steps.length - 1 : i;
+      } else { S.idx = S.steps.length - 1; }
+      render();
+    }
+
+    cont.addEventListener("click", () => {
+      if (cont.disabled) return;
+      if (!S.offerPassword) return finish(false);
+      const pw = ($("#bkNewPw", body) || { value: "" }).value;
+      if (!pw) return msg(foot, "Type a password, or tap Not now to skip it.", true);
+      finish(true);
     });
+    if (skip) skip.addEventListener("click", () => { if (!skip.disabled) finish(false); });
   }
 
   // ----- step: review -----
   function rReview(body, foot) {
     const s = S.service;
     const dep = s.deposit_cents;
+    const c = me && me.client;
     body.appendChild(el(`
       <div class="review-rows">
         <div class="rr"><b>Style</b><span class="v">${esc(s.name)}</span></div>
         <div class="rr"><b>When</b><span class="v">${esc(fmtDate(S.date))} at ${esc(fmtTime(S.time))}</span></div>
         <div class="rr"><b>Takes about</b><span class="v">${esc(s.duration_label || "")}</span></div>
         <div class="rr"><b>Price</b><span class="v">${esc(s.price)}</span></div>
-        ${S.notes ? `<div class="rr"><b>Notes</b><span class="v">${esc(S.notes)}</span></div>` : ""}
+        ${c ? `<div class="rr"><b>Booking as</b><span class="v">${esc(c.name || c.email)}</span></div>` : ""}
       </div>`));
+    body.appendChild(el(`<div class="field" style="margin-top:1rem"><label for="bkNotes">Anything Ebony should know? (optional)</label><textarea id="bkNotes" rows="2" placeholder="Hair length, inspo, questions...">${esc(S.notes)}</textarea></div>`));
     body.appendChild(el(dep != null
       ? `<div class="deposit-line"><b>Deposit due now: ${money(dep)}.</b> Paid securely online; it comes off your balance on the day. The rest is due at your appointment.</div>`
       : `<div class="deposit-line"><b>A deposit still secures this appointment.</b> Ebony will text you to confirm your deposit amount before your time is locked in.</div>`));
@@ -415,11 +682,11 @@
     foot.appendChild(book);
     book.addEventListener("click", async () => {
       if (book.disabled) return;
+      S.notes = ($("#bkNotes", body) || { value: "" }).value.trim();
       book.disabled = true; msg(foot, "Saving your seat...");
       const seq = opSeq;
       try {
         const data = await SP.request("/api/bookings", { method: "POST", body: { service_id: s.service_id, date: S.date, time: S.time, notes: S.notes } });
-        me = null; // refetch bookings next time either way
         if (stale(seq)) return; // sheet closed mid-save; the booking lives under My bookings
         if (data.checkout_url) { window.location.href = data.checkout_url; return; }
         render({ title: "Request sent", icon: "✓", head: "Ebony's got it!", copy: "She'll text you to confirm your deposit and your time. You can see this booking any time under My bookings." });
@@ -437,7 +704,7 @@
         body.appendChild(el(`<p class="time-empty">${esc(e.message)}</p>`)); return;
       }
       if (stale(seq)) return;
-      me = fresh;
+      me = fresh; syncNav();
       const upcoming = me.bookings.filter(b => b.status !== "canceled" && b.status !== "completed");
       const past = me.bookings.filter(b => b.status === "canceled" || b.status === "completed");
       const CHIP = { awaiting_deposit: ["chip-awaiting", "Deposit due"], request: ["chip-request", "Waiting on Ebony"], confirmed: ["chip-confirmed", "Confirmed"], completed: ["chip-completed", "Done"], canceled: ["chip-canceled", "Canceled"] };
@@ -480,7 +747,6 @@
     const seq = opSeq;
     try {
       await SP.request(`/api/bookings/${encodeURIComponent(btn.getAttribute("data-cancel"))}/cancel`, { method: "POST" });
-      me = null;
       if (stale(seq)) return;
       render(); // re-runs the list step with fresh data
     } catch (err) {
@@ -556,21 +822,93 @@
     }
   }
 
+  // ---------- signed-in nav ----------
+  // Signed out, the nav stays exactly as it was. Signed in, "My bookings"
+  // becomes one compact account button holding My bookings and Log out.
+  const firstName = (c) => {
+    const n = (c.name || "").trim();
+    return n ? n.split(/\s+/)[0] : (c.email || "").split("@")[0];
+  };
+  function closeAcctMenu() {
+    const menu = $("#navAccountMenu"); const btn = $("#navAccount");
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+  function syncNav() {
+    const wrap = $("#navAccountWrap"); const plain = $("#navMyBookings");
+    if (!wrap || !plain) return;
+    const c = me && me.client;
+    if (c && !offline) {
+      $("#navAccountName").textContent = firstName(c);
+      $("#navAccount").setAttribute("aria-label", "Account menu for " + firstName(c));
+      wrap.hidden = false; plain.hidden = true;
+    } else {
+      closeAcctMenu();
+      wrap.hidden = true; plain.hidden = false;
+    }
+  }
+  function wireNav() {
+    const btn = $("#navAccount");
+    if (!btn) return;
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const menu = $("#navAccountMenu");
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    $("#navAcctBookings").addEventListener("click", () => { closeAcctMenu(); openMyBookings(); });
+    $("#navAcctLogout").addEventListener("click", async () => {
+      closeAcctMenu();
+      await SP.logout();
+      me = null; S.pendingProfile = false; S.offerPassword = false; resetAuthUi();
+      syncNav();
+      closeSheet();
+    });
+    document.addEventListener("click", e => { if (!e.target.closest("#navAccountWrap")) closeAcctMenu(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeAcctMenu(); });
+  }
+
   // ---------- boot ----------
   async function boot() {
     await loadCatalog();
     buildAccordion();
+    wireNav();
     // demo ribbon
     try { await SP.request("/api/_outbox"); demoMode = true; $("#demoRibbon").style.display = "block"; } catch (e) {}
     if (offline) { const b = $("#navMyBookings"); if (b) b.style.display = "none"; }
     document.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBooking(null)));
     $("#navMyBookings").addEventListener("click", openMyBookings);
+
+    // Sessions are long lived, so pick the client back up before anything else.
+    if (!offline && SP.hasToken()) {
+      try { me = await SP.me(); } catch (e) { me = null; }
+      syncNav();
+    }
+
     // returning from checkout
     const q = new URLSearchParams(window.location.search);
     if (q.get("paid") === "1") {
       const bookingId = q.get("booking") || "";
       history.replaceState(null, "", window.location.pathname);
       verifyPaidReturn(bookingId);
+      return;
+    }
+
+    // Returning from the Google trip: pick the booking back up where it was.
+    const pending = takePending();
+    if (SP.returnedFromRedirect() && pending && me && me.client) {
+      S.mode = pending.mode === "mybookings" ? "mybookings" : "book";
+      S.service = pending.service_id ? findService(pending.service_id) : null;
+      S.date = pending.date || null; S.time = pending.time || null; S.notes = pending.notes || "";
+      S.idx = 0; resetAuthUi();
+      if (S.mode === "book" && (!S.service || !S.date || !S.time)) { setSteps(); openSheet(); render(); return; }
+      openSheet();
+      afterAuth();
+    } else if (SP.returnedFromRedirect() && me && me.client) {
+      S.mode = "mybookings"; S.idx = 0; resetAuthUi();
+      openSheet(); afterAuth();
     }
   }
   document.addEventListener("DOMContentLoaded", boot);

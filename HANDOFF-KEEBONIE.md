@@ -28,6 +28,18 @@ her identity, and it is the reason payouts land in her account automatically.
 Nelson never needs her banking details, and her deposits never pass through his
 accounts.
 
+## How clients sign in
+
+Three ways, so nobody gets stuck:
+
+- **Continue with Google.** One tap, nothing to remember. Most of her clients
+  already have a Google account on their phone.
+- **Email and password.** They make a profile once and log in normally after that.
+- **Emailed code.** The backup, and how anyone resets a forgotten password.
+
+Once someone signs in, they stay signed in on that phone, so booking again later
+is just: pick the style, pick the time, done.
+
 ## What Nelson needs from her
 
 1. **Her real email address** for the business (the one clients would recognize).

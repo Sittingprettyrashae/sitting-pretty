@@ -6,14 +6,19 @@
 // are public, and Stripe calls /stripe/webhook without a Supabase JWT.
 // Everything that needs auth enforces it in code via _shared/auth.ts.
 //
+// Auth: password, Google, and the email code are all native Supabase Auth
+// calls made from the browser with supabase-js, so most of API.md's
+// /api/auth/* endpoints have no server side here. The two that do
+// (/auth/bootstrap and /auth/logout) live in auth.ts; the rest answer 410
+// naming the supabase-js call that replaced them. See _shared/auth.ts.
+//
 // Demo-only endpoints from API.md that do NOT exist here on purpose:
-// - /api/auth/* : production auth is Supabase Auth email OTP, called
-//   client-side (signInWithOtp / verifyOtp). See _shared/auth.ts.
 // - /api/checkout/* and /api/_outbox, /api/_reset : demo simulations. In
 //   production checkout_url is a real Stripe Checkout page and the outbox
 //   is the notifications_log table.
 
 import { corsHeaders, errorResponse, HttpError } from "../_shared/http.ts";
+import { handleAuth } from "./auth.ts";
 import { handleAvailability, handleCreateBooking, handleServices } from "./bookings.ts";
 import { handleMe } from "./me.ts";
 import { handleCancel } from "./cancel.ts";
@@ -45,12 +50,7 @@ Deno.serve(async (req: Request) => {
 
     if (path.startsWith("/admin/")) return await handleAdmin(req, path);
 
-    if (path.startsWith("/auth/")) {
-      return errorResponse(
-        410,
-        "Sign-in goes through Supabase Auth in production, not this API",
-      );
-    }
+    if (path.startsWith("/auth/")) return await handleAuth(req, path);
     if (path.startsWith("/checkout/") || path.startsWith("/_")) {
       return errorResponse(404, "Demo-only endpoint, not available in production");
     }

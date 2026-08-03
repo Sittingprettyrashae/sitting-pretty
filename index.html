@@ -60,9 +60,24 @@ nav .book-pill{
 }
 nav .book-pill:hover{background:var(--rose-deep)}
 nav .book-pill:active{transform:scale(.97)}
+/* signed-in account button + menu */
+nav .acct{position:relative}
+nav .acct > button{display:inline-flex;align-items:center;gap:.4rem;max-width:9.5rem}
+nav .acct > button #navAccountName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+nav .acct .acct-dot{
+  width:20px;height:20px;border-radius:50%;background:var(--rose-soft);
+  border:1px solid var(--line-strong);flex-shrink:0;
+}
+nav .acct-menu{
+  position:absolute;top:calc(100% + .55rem);right:0;min-width:11rem;z-index:120;
+  background:var(--surface);border:1px solid var(--line);border-radius:.9rem;
+  box-shadow:var(--shadow-lift);padding:.3rem;display:flex;flex-direction:column;
+}
+nav .acct-menu button{width:100%;text-align:left;border-radius:.6rem}
 @media (max-width:680px){
   nav .links a[href="#work"], nav .links a[href="#about"]{display:none}
   nav{gap:.25rem}
+  nav .acct > button{max-width:7rem}
 }
 
 /* ---------- shared ---------- */
@@ -336,6 +351,33 @@ dialog[open] .sheet{transform:translateY(0)}
   background:var(--surface);font-family:inherit;font-size:1rem;color:var(--ink);
 }
 .field input:focus,.field textarea:focus{outline:2px solid var(--rose);outline-offset:1px;border-color:transparent}
+.field-hint{font-size:.78rem;color:var(--ink-faint);margin-top:.35rem}
+.lead-note{color:var(--ink-dim);font-size:.92rem;margin-bottom:.9rem;line-height:1.5}
+/* account step */
+.btn-google{width:100%;justify-content:center}
+.btn-google .gmark{flex-shrink:0}
+.or-line{display:flex;align-items:center;gap:.75rem;margin:.95rem 0;color:var(--ink-faint);font-size:.8rem}
+.or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}
+.seg{display:flex;gap:.25rem;background:var(--surface-2);border-radius:var(--r-pill);padding:.25rem;margin-bottom:1rem}
+.seg button{
+  flex:1;border:none;background:none;font-family:inherit;font-size:.87rem;font-weight:700;
+  color:var(--ink-dim);padding:.55rem .4rem;border-radius:var(--r-pill);cursor:pointer;min-height:40px;
+  transition:background .18s var(--ease-out), color .18s var(--ease-out);
+}
+.seg button[aria-selected="true"]{background:var(--surface);color:var(--rose-deep);box-shadow:var(--shadow-soft)}
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:4.4rem}
+.pw-toggle{
+  position:absolute;right:.45rem;top:50%;transform:translateY(-50%);
+  border:none;background:none;font-family:inherit;font-size:.8rem;font-weight:700;
+  color:var(--rose);cursor:pointer;padding:.4rem .5rem;border-radius:.6rem;
+}
+.pw-toggle:hover{background:var(--rose-soft)}
+.alt-links{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:.85rem;color:var(--ink-faint);margin-top:.2rem}
+.alt-links button{
+  border:none;background:none;font-family:inherit;font-size:.85rem;font-weight:700;
+  color:var(--rose);cursor:pointer;padding:.35rem 0;text-decoration:underline;text-underline-offset:2px;
+}
 .sheet-foot{padding: .9rem 1.3rem 1.2rem;border-top:1px solid var(--line);flex-shrink:0}
 .sheet-foot .btn{width:100%}
 .sheet-msg{font-size:.86rem;color:var(--ink-dim);margin-top:.6rem;text-align:center}
@@ -395,6 +437,15 @@ dialog[open] .sheet{transform:translateY(0)}
     <a href="#work">The Work</a>
     <a href="#about">Meet Ebony</a>
     <button type="button" id="navMyBookings">My bookings</button>
+    <div class="acct" id="navAccountWrap" hidden>
+      <button type="button" id="navAccount" aria-expanded="false" aria-haspopup="true" aria-controls="navAccountMenu">
+        <span class="acct-dot" aria-hidden="true"></span><span id="navAccountName">Account</span>
+      </button>
+      <div class="acct-menu" id="navAccountMenu" hidden>
+        <button type="button" id="navAcctBookings">My bookings</button>
+        <button type="button" id="navAcctLogout">Log out</button>
+      </div>
+    </div>
   </div>
   <button type="button" class="book-pill" data-book>Book Now</button>
 </nav>

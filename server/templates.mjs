@@ -55,6 +55,24 @@ export function renderNotification(event, data) {
         sms: { body: 'Sitting Pretty: your sign-in code is ' + d.code + '. It expires in 10 minutes.' }
       };
 
+    case 'reset_code':
+      return {
+        email: {
+          subject: 'Reset your Sitting Pretty password',
+          body:
+            'Hi ' + name + ',\n\n' +
+            'Your reset code is ' + d.code + '. It expires in 10 minutes.\n\n' +
+            'Enter it on the sign-in screen and you can set a new password right after.\n\n' +
+            'If you did not ask to reset your password, you can ignore this message ' +
+            'and your current one keeps working.\n\n' +
+            'Sitting Pretty'
+        },
+        sms: {
+          body: 'Sitting Pretty: your password reset code is ' + d.code +
+            '. It expires in 10 minutes.'
+        }
+      };
+
     case 'booking_created_awaiting_deposit':
       return {
         email: {
