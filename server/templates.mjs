@@ -114,7 +114,16 @@ export function renderNotification(event, data) {
         }
       };
 
-    case 'booking_confirmed':
+    case 'booking_confirmed': {
+      // Deposit is in, so the time is hers and nobody else can take it. Say
+      // plainly what is still owed and that either way of paying is fine.
+      const bal = d.balance_cents;
+      const restLine = bal
+        ? 'Your deposit is paid and this time is now held for you.\n' +
+          'Balance still due: ' + money(bal) + '. Bring it to your appointment, ' +
+          'or sign in any time and pay it online before you come.\n\n'
+        : 'Your deposit is paid and this time is now held for you.\n' +
+          'Ebony will settle the rest with you at your appointment.\n\n';
       return {
         email: {
           subject: 'You are booked: ' + b.service_name + ' on ' + niceDate(b.date),
@@ -122,12 +131,32 @@ export function renderNotification(event, data) {
             'Hi ' + name + ',\n\n' +
             'You are all set:\n\n' +
             summary(b) + '\n\n' +
+            restLine +
             'Text ' + PHONE + ' if you need anything before your visit.\n\n' +
             'See you soon,\nSitting Pretty'
         },
         sms: {
           body:
-            'Sitting Pretty: you are booked. ' + b.service_name + ' on ' + when(b) + '. See you soon.'
+            'Sitting Pretty: you are booked. ' + b.service_name + ' on ' + when(b) +
+            '. Your time is held.' + (bal ? ' Balance ' + money(bal) + ' due at your appointment or online.' : '')
+        }
+      };
+    }
+
+    case 'balance_paid':
+      return {
+        email: {
+          subject: 'Paid in full: ' + b.service_name + ' on ' + niceDate(b.date),
+          body:
+            'Hi ' + name + ',\n\n' +
+            'Your ' + b.service_name + ' on ' + when(b) + ' is now paid in full. ' +
+            'Nothing to bring but yourself.\n\n' +
+            'See you soon,\nSitting Pretty'
+        },
+        sms: {
+          body:
+            'Sitting Pretty: ' + b.service_name + ' on ' + when(b) +
+            ' is paid in full. Nothing due at your appointment.'
         }
       };
 

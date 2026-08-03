@@ -272,6 +272,7 @@
   function actionsFor(b) {
     var acts = [];
     if (b.status === "request" || b.status === "awaiting_deposit") acts.push("confirm");
+    if (isActive(b) && !b.paid_in_full) acts.push("markpaid");
     if (b.status === "confirmed" && b.date <= todayStr()) acts.push("complete");
     if (isActive(b)) acts.push("cancel");
     return acts;
@@ -291,10 +292,21 @@
     html += '<div class="bcard-service"><span>' + esc(b.service_name || b.service_id || "") + '</span><span class="bcard-price">' + esc(fmtPrice(b.price));
     if (b.deposit_cents) html += '<em class="bcard-dep">' + esc(fmtDeposit(b.deposit_cents)) + " deposit</em>";
     html += "</span></div>";
+    // Where this one stands on money, so she knows what to collect in the chair.
+    if (b.status !== "canceled") {
+      if (b.paid_in_full) {
+        html += '<div class="bcard-money bcard-money-paid">Paid in full' + (b.paid_in_person ? " (in person)" : "") + "</div>";
+      } else if (b.status === "confirmed" && b.balance_cents) {
+        html += '<div class="bcard-money">Deposit paid. ' + esc(fmtDeposit(b.balance_cents)) + " due at the appointment</div>";
+      } else if (b.status === "confirmed") {
+        html += '<div class="bcard-money">Deposit paid. Balance settled in person</div>';
+      }
+    }
     if (b.notes) html += '<p class="bcard-notes">' + escBr(b.notes) + "</p>";
     if (acts.length) {
       html += '<div class="bcard-actions">';
       if (acts.indexOf("confirm") > -1) html += '<button class="btn btn-solid btn-sm" type="button" data-action="confirm" data-id="' + id + '">Confirm</button>';
+      if (acts.indexOf("markpaid") > -1) html += '<button class="btn btn-ghost btn-sm" type="button" data-action="markpaid" data-id="' + id + '">Paid in person</button>';
       if (acts.indexOf("complete") > -1) html += '<button class="btn btn-ghost btn-sm" type="button" data-action="complete" data-id="' + id + '">Mark completed</button>';
       if (acts.indexOf("cancel") > -1) html += '<button class="btn btn-danger btn-sm" type="button" data-action="cancel" data-id="' + id + '">Cancel</button>';
       html += "</div>";
@@ -340,6 +352,22 @@
     state.bookings.push(updated);
   }
 
+  // She collected the rest in the chair: cash, Zelle, card, however she took it.
+  function markPaidInPerson(btn, booking, amountCents) {
+    btn.disabled = true;
+    var body = amountCents ? { amount_cents: amountCents } : {};
+    apiPost("/api/admin/bookings/" + encodeURIComponent(String(booking.id)) + "/mark-paid", body)
+      .then(function (res) {
+        if (res && res.booking) replaceBooking(res.booking);
+        toast("Marked paid in full.");
+        renderAll();
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(errMsg(err));
+      });
+  }
+
   function setStatus(btn, booking, status, okMsg) {
     btn.disabled = true;
     apiPost("/api/admin/bookings/" + encodeURIComponent(String(booking.id)) + "/status", { status: status })
@@ -363,6 +391,19 @@
     var action = btn.getAttribute("data-action");
     if (action === "confirm") {
       setStatus(btn, b, "confirmed", "Booking confirmed.");
+    } else if (action === "markpaid") {
+      // Her variable-price services have no number to settle, so ask for it.
+      if (b.balance_cents) {
+        if (!window.confirm("Mark " + (b.client_name || "this client") + " as paid in full? " +
+            fmtDeposit(b.balance_cents) + " will be recorded as collected in person.")) return;
+        markPaidInPerson(btn, b, 0);
+      } else {
+        var entered = window.prompt("How much did you collect for " + (b.service_name || "this appointment") + "? Enter dollars, for example 150", "");
+        if (entered === null) return;
+        var dollars = parseFloat(String(entered).replace(/[^0-9.]/g, ""));
+        if (!(dollars > 0)) { toast("Enter the amount you collected."); return; }
+        markPaidInPerson(btn, b, Math.round(dollars * 100));
+      }
     } else if (action === "complete") {
       setStatus(btn, b, "completed", "Marked completed.");
     } else if (action === "cancel") {

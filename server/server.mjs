@@ -701,7 +701,13 @@ function availability(svc, dateStr) {
 
 /* ---------------- payments --------------------------------------------------- */
 
-async function createCheckout(booking, origin) {
+// kind: 'deposit' locks the appointment in; 'balance' is the rest of the price,
+// paid online later by a client who would rather not settle up in the chair.
+async function createCheckout(booking, origin, kind = 'deposit', amountCents = null) {
+  const amount = amountCents == null ? booking.deposit_cents : amountCents;
+  const label = kind === 'balance'
+    ? 'Balance: ' + booking.service_name
+    : 'Deposit: ' + booking.service_name;
   // pay_token: one-time unguessable secret embedded in the checkout URL so the
   // (unauthenticated, same-origin) demo checkout page can prove it belongs to
   // this session. Ownership can also be proven with the client's auth token.
@@ -713,9 +719,10 @@ async function createCheckout(booking, origin) {
     p.set('cancel_url', origin + '/?canceled=1&booking=' + booking.id);
     p.set('line_items[0][quantity]', '1');
     p.set('line_items[0][price_data][currency]', 'usd');
-    p.set('line_items[0][price_data][unit_amount]', String(booking.deposit_cents));
-    p.set('line_items[0][price_data][product_data][name]', 'Deposit: ' + booking.service_name);
+    p.set('line_items[0][price_data][unit_amount]', String(amount));
+    p.set('line_items[0][price_data][product_data][name]', label);
     p.set('metadata[booking_id]', booking.id);
+    p.set('metadata[kind]', kind);
     const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
       method: 'POST',
       headers: {
@@ -729,7 +736,7 @@ async function createCheckout(booking, origin) {
       throw new ApiError(502, 'Stripe error: ' + (json.error && json.error.message || res.status));
     }
     db.checkout_sessions[json.id] = {
-      id: json.id, booking_id: booking.id, amount_cents: booking.deposit_cents,
+      id: json.id, booking_id: booking.id, amount_cents: amount, kind,
       paid: false, stripe: true, url: json.url, pay_token: payToken,
       created_at: new Date().toISOString()
     };
@@ -738,11 +745,54 @@ async function createCheckout(booking, origin) {
   const sid = 'demo_' + crypto.randomBytes(8).toString('hex');
   const url = '/demo-checkout?session=' + sid + '&pay_token=' + payToken;
   db.checkout_sessions[sid] = {
-    id: sid, booking_id: booking.id, amount_cents: booking.deposit_cents,
+    id: sid, booking_id: booking.id, amount_cents: amount, kind,
     paid: false, stripe: false, url, pay_token: payToken,
     created_at: new Date().toISOString()
   };
   return { id: sid, url };
+}
+
+// Total from her price string. "$150" is exact; "$50+" and anything else with a
+// plus means the final number depends on length, hair, or add-ons, so it is
+// settled with her in person and never charged online as if it were fixed.
+function totalCentsFor(booking) {
+  const raw = String(booking.price || '');
+  if (/\+/.test(raw)) return null;
+  const m = raw.match(/\d+/);
+  return m ? parseInt(m[0], 10) * 100 : null;
+}
+
+function paidCents(booking) {
+  return booking.paid_cents || 0;
+}
+
+// Everything the UI needs to talk about money, derived so it can never drift
+// from the stored payments.
+function withMoney(booking) {
+  return {
+    ...booking,
+    paid_cents: paidCents(booking),
+    total_cents: totalCentsFor(booking),
+    balance_cents: balanceCentsFor(booking),
+    paid_in_full: !!booking.paid_in_full
+  };
+}
+
+// What the client can still pay online: the fixed total minus what has landed.
+// null means "not payable online" (variable price, or nothing left owing).
+function balanceCentsFor(booking) {
+  if (booking.paid_in_full) return null;
+  const total = totalCentsFor(booking);
+  if (total == null) return null;
+  const left = total - paidCents(booking);
+  return left > 0 ? left : null;
+}
+
+// Adds a payment and keeps the paid-in-full flag honest.
+function applyPayment(booking, amountCents) {
+  booking.paid_cents = paidCents(booking) + (amountCents || 0);
+  const total = totalCentsFor(booking);
+  if (total != null && booking.paid_cents >= total) booking.paid_in_full = true;
 }
 
 function safeTokenEqual(a, b) {
@@ -769,14 +819,26 @@ function isPayable(booking) {
   return booking.status === 'awaiting_deposit' || booking.status === 'request';
 }
 
-function markDepositPaid(booking) {
+function markDepositPaid(booking, amountCents) {
   if (isPayable(booking)) {
     booking.status = 'confirmed';
+    booking.deposit_paid_at = new Date().toISOString();
+    applyPayment(booking, amountCents == null ? booking.deposit_cents : amountCents);
     notify('booking_confirmed',
       { email: booking.client_email, phone: booking.client_phone, name: booking.client_name },
-      { booking });
+      { booking, balance_cents: balanceCentsFor(booking) });
     save();
   }
+}
+
+// The rest of the price, paid online instead of in the chair.
+function markBalancePaid(booking, amountCents) {
+  applyPayment(booking, amountCents);
+  booking.paid_in_full = true;
+  notify('balance_paid',
+    { email: booking.client_email, phone: booking.client_phone, name: booking.client_name },
+    { booking });
+  save();
 }
 
 /* ---------------- deposit deadline sweeper ----------------------------------- */
@@ -1094,7 +1156,10 @@ async function handleApi(req, res, url) {
       bookings.push({ ...b, checkout_url: sess.url });
     }
     if (dirty) save();
-    return sendJson(res, 200, { client: publicClient(client), bookings });
+    return sendJson(res, 200, {
+      client: publicClient(client),
+      bookings: bookings.map(withMoney)
+    });
   }
 
   if (method === 'POST' && p === '/api/me') {
@@ -1153,16 +1218,29 @@ async function handleApi(req, res, url) {
       created_at: new Date().toISOString()
     };
 
+    // Claim the slot NOW, in the same synchronous turn as the availability
+    // check above. Creating the checkout session is async, and doing it first
+    // yielded the event loop between "is this free?" and "it is mine", which
+    // let two people booking at the same moment both win the same time.
+    db.bookings.push(booking);
+
     let checkoutUrl = null;
     if (svc.deposit_cents == null) {
-      db.bookings.push(booking);
       notify('booking_request_received',
         { email: client.email, phone: client.phone, name: client.name },
         { booking });
     } else {
-      const session = await createCheckout(booking, origin);
+      let session;
+      try {
+        session = await createCheckout(booking, origin);
+      } catch (err) {
+        // Never leave a slot held by a booking that has no way to be paid.
+        const i = db.bookings.indexOf(booking);
+        if (i >= 0) db.bookings.splice(i, 1);
+        save();
+        throw err;
+      }
       booking.checkout_session_id = session.id;
-      db.bookings.push(booking);
       checkoutUrl = session.url;
       const absolute = checkoutUrl.startsWith('http') ? checkoutUrl : origin + checkoutUrl;
       notify('booking_created_awaiting_deposit',
@@ -1217,17 +1295,48 @@ async function handleApi(req, res, url) {
     const booking = db.bookings.find((b) => b.id === session.booking_id);
     if (!booking) throw new ApiError(404, 'Booking not found');
     requireCheckoutAccess(req, url, session, booking);
-    // Never take money for an appointment that is no longer standing.
-    if (!isPayable(booking)) {
-      throw new ApiError(409, booking.status === 'canceled'
-        ? 'This appointment was cancelled, so it can no longer be paid for. Text Ebony if you would like to rebook.'
-        : 'This appointment is already settled, so there is nothing left to pay.');
-    }
     if (session.paid) return sendJson(res, 200, { ok: true, booking, already_paid: true });
-    session.paid = true;
-    markDepositPaid(booking);
+    // Never take money for an appointment that is no longer standing.
+    if (booking.status === 'canceled') {
+      throw new ApiError(409,
+        'This appointment was cancelled, so it can no longer be paid for. Text Ebony if you would like to rebook.');
+    }
+    if (session.kind === 'balance') {
+      if (booking.paid_in_full) throw new ApiError(409, 'This one is already paid in full.');
+      session.paid = true;
+      markBalancePaid(booking, session.amount_cents);
+    } else {
+      if (!isPayable(booking)) {
+        throw new ApiError(409, 'This appointment is already settled, so there is nothing left to pay.');
+      }
+      session.paid = true;
+      markDepositPaid(booking, session.amount_cents);
+    }
     save();
     return sendJson(res, 200, { ok: true, booking });
+  }
+
+  // The client chose to settle the rest online instead of in person.
+  if (method === 'POST' && (m = /^\/api\/bookings\/([\w-]+)\/pay-balance$/.exec(p))) {
+    const client = requireAuth(req);
+    const booking = db.bookings.find((b) => b.id === m[1]);
+    if (!booking) throw new ApiError(404, 'Booking not found');
+    if (booking.client_id !== client.id && !client.is_admin) throw new ApiError(403, 'Not your booking');
+    if (booking.status === 'canceled') throw new ApiError(409, 'That appointment was cancelled.');
+    if (booking.status === 'awaiting_deposit') {
+      throw new ApiError(409, 'Pay the deposit first, then the rest can be paid any time.');
+    }
+    if (booking.paid_in_full) throw new ApiError(409, 'This one is already paid in full.');
+    const balance = balanceCentsFor(booking);
+    if (balance == null) {
+      throw new ApiError(409,
+        'The final amount for this service depends on your hair, so Ebony settles it with you in person.');
+    }
+    const session = await createCheckout(booking, origin, 'balance', balance);
+    booking.balance_session_id = session.id;
+    save();
+    const absolute = session.url.startsWith('http') ? session.url : origin + session.url;
+    return sendJson(res, 200, { checkout_url: absolute, amount_cents: balance });
   }
 
   if (method === 'POST' && p === '/api/stripe/webhook') {
@@ -1267,7 +1376,27 @@ async function handleApi(req, res, url) {
     if (to) list = list.filter((b) => b.date <= to);
     if (status) list = list.filter((b) => b.status === status);
     list.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-    return sendJson(res, 200, { bookings: list });
+    return sendJson(res, 200, { bookings: list.map(withMoney) });
+  }
+
+  // Ebony settled up with the client in the chair: cash, Zelle, card, whatever.
+  if (method === 'POST' && (m = /^\/api\/admin\/bookings\/([\w-]+)\/mark-paid$/.exec(p))) {
+    requireAdmin(req);
+    const body = await readBody(req);
+    const booking = db.bookings.find((b) => b.id === m[1]);
+    if (!booking) throw new ApiError(404, 'Booking not found');
+    if (booking.status === 'canceled') throw new ApiError(409, 'That appointment was cancelled.');
+    // She can name the amount for the services whose final price depends on
+    // the hair; otherwise it settles the known balance.
+    const amount = Number.isFinite(body.amount_cents) && body.amount_cents > 0
+      ? Math.round(body.amount_cents)
+      : balanceCentsFor(booking);
+    applyPayment(booking, amount || 0);
+    booking.paid_in_full = true;
+    booking.paid_in_person = true;
+    if (booking.status === 'awaiting_deposit' || booking.status === 'request') booking.status = 'confirmed';
+    save();
+    return sendJson(res, 200, { booking: withMoney(booking) });
   }
 
   if (method === 'POST' && (m = /^\/api\/admin\/bookings\/([\w-]+)\/status$/.exec(p))) {
@@ -1434,8 +1563,10 @@ function demoCheckoutPage(res, reqUrl) {
       <div class="row"><span class="label">Time</span><span class="val">${escapeHtml(niceTimeHuman(booking.time))}</span></div>
       <div class="row"><span class="label">Service price</span><span class="val">${escapeHtml(booking.price)}</span></div>
       <div class="amount">${escapeHtml(moneyStr(session.amount_cents))}</div>
-      <div class="amount-note">Deposit due now. It comes off your balance the day of your service.</div>
-      <button class="pay" id="pay">Pay ${escapeHtml(moneyStr(session.amount_cents))} deposit</button>
+      <div class="amount-note">${session.kind === 'balance'
+        ? 'The rest of your service price. Once this clears there is nothing due at your appointment.'
+        : 'Deposit due now. It holds this time for you and comes off your balance the day of your service.'}</div>
+      <button class="pay" id="pay">Pay ${escapeHtml(moneyStr(session.amount_cents))}${session.kind === 'balance' ? ' balance' : ' deposit'}</button>
       <a class="back" href="/">Cancel and go back</a>
       <script>
         document.getElementById('pay').addEventListener('click', async function () {

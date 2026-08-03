@@ -207,6 +207,8 @@
     if (cancelBtn) { onCancelBooking(cancelBtn); return; }
     const payBtn = e.target.closest("[data-payfix]");
     if (payBtn) { onFinishPaying(payBtn); return; }
+    const balBtn = e.target.closest("[data-paybal]");
+    if (balBtn) { onPayBalance(balBtn); return; }
   });
 
   // Signed in with a usable profile: no account step at all, so a returning
@@ -774,12 +776,28 @@
           : b.checkout_url
             ? `<a class="btn btn-solid" style="${payBtnStyle}" href="${esc(b.checkout_url)}">Pay deposit</a>`
             : `<button type="button" class="btn btn-solid" style="${payBtnStyle}" data-payfix="${esc(String(b.id))}">Finish paying</button>`;
+        // Once the deposit is in, the rest can wait for the chair or be paid
+        // here. Never show a number for the services she prices in person.
+        const settled = b.paid_in_full && b.status !== "canceled";
+        const canPayBalance = !settled && b.status === "confirmed" && b.balance_cents;
+        const balanceAction = canPayBalance
+          ? `<button type="button" class="btn btn-ghost" style="${payBtnStyle}" data-paybal="${esc(String(b.id))}">Pay balance ${money(b.balance_cents)}</button>`
+          : "";
+        const moneyNote = b.status === "canceled" ? ""
+          : settled ? `<div class="mybk-note">Paid in full. Nothing due at your appointment.</div>`
+          : b.status === "confirmed" && b.balance_cents
+            ? `<div class="mybk-note">Deposit paid, your time is held. ${money(b.balance_cents)} due at your appointment, or pay it here.</div>`
+            : b.status === "confirmed"
+              ? `<div class="mybk-note">Deposit paid, your time is held. Ebony settles the rest with you in person.</div>`
+              : "";
         return el(`
           <div class="mybk-item">
             <div class="top"><span class="when">${esc(fmtDate(b.date))} · ${esc(fmtTime(b.time))}</span><span class="chip ${cls}">${label}</span></div>
             <div class="what">${esc(b.service_name)} · ${esc(b.price)}</div>
+            ${moneyNote}
             <div class="actions">
               ${payAction}
+              ${balanceAction}
               ${active ? `<button type="button" class="cancel-link" data-cancel="${esc(String(b.id))}">Cancel booking</button>` : ""}
             </div>
           </div>`);
@@ -817,6 +835,25 @@
   // Finish an unpaid deposit even when /api/me gave us no checkout_url:
   // re-fetch in case the server can mint a fresh session, else point the
   // client at their booking email or Ebony directly.
+  // Settle the rest online rather than in the chair.
+  async function onPayBalance(btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const id = btn.getAttribute("data-paybal");
+    const seq = opSeq;
+    try {
+      const data = await SP.request("/api/bookings/" + encodeURIComponent(id) + "/pay-balance", { method: "POST" });
+      if (stale(seq)) return;
+      if (data && data.checkout_url) { window.location.href = data.checkout_url; return; }
+      msg($("#sheetFoot"), "Could not start that payment. Text Ebony at (817) 704-8300.", true);
+      btn.disabled = false;
+    } catch (e) {
+      if (stale(seq)) return;
+      msg($("#sheetFoot"), e.message, true);
+      btn.disabled = false;
+    }
+  }
+
   async function onFinishPaying(btn) {
     if (btn.disabled) return;
     btn.disabled = true;
@@ -857,6 +894,7 @@
     render({ title: "One moment", icon: "...", head: "Checking your payment", copy: "Give us a second while we confirm your deposit." });
     const seq = opSeq;
     let confirmed = false;
+    let paidInFull = false;
     if (SP.hasToken() && bookingId) {
       for (let attempt = 0; attempt < 3 && !confirmed; attempt++) {
         if (attempt) {
@@ -869,12 +907,15 @@
           me = fresh;
           const b = (fresh.bookings || []).find(x => String(x.id) === String(bookingId));
           confirmed = !!b && (b.status === "confirmed" || b.status === "completed");
+          paidInFull = !!(b && b.paid_in_full);
         } catch (e) { break; }
       }
     }
     if (stale(seq)) return;
     if (confirmed) {
-      render({ title: "You're booked", icon: "♥", head: "Your seat is saved!", copy: "Deposit received. Check your email for your confirmation, and Ebony will see you soon." });
+      render(paidInFull
+        ? { title: "Paid in full", icon: "♥", head: "You are all paid up!", copy: "Nothing due at your appointment. Check your email for the receipt, and Ebony will see you soon." }
+        : { title: "You're booked", icon: "♥", head: "Your seat is saved!", copy: "Deposit received and this time is now held for you. Check your email for your confirmation." });
     } else {
       render({ title: "Almost there", icon: "...", head: "We are confirming your payment", copy: "Your payment is still processing. Give it a minute, then check My bookings. If anything looks off, text Ebony at (817) 704-8300." });
     }
