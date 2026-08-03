@@ -41,12 +41,19 @@ export async function handleAuth(req: Request, path: string): Promise<Response> 
     return await logout(req);
   }
 
+  // The `error` string can reach a client's screen, so it stays plain English.
+  // The SDK call belongs to whoever is wiring the frontend, not to someone
+  // trying to book an appointment, so it travels in a separate field the UI
+  // never renders.
   const hint = REPLACED_BY[path];
-  return errorResponse(
+  return json(
+    {
+      error: "Sign-in is not available at this address. Reload the booking page and try again.",
+      developer_hint: hint
+        ? `This endpoint is handled by Supabase Auth in the browser. Use ${hint}`
+        : "Sign-in runs through Supabase Auth in the browser, not this API",
+    },
     410,
-    hint
-      ? `Sign-in runs through Supabase Auth in production. Use ${hint}`
-      : "Sign-in runs through Supabase Auth in production, not this API",
   );
 }
 

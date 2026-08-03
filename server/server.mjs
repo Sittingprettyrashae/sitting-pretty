@@ -557,17 +557,35 @@ function purgeOauthStates() {
 // CSRF defense for the OAuth round trip: unguessable value minted here, stored
 // server side with a 10 minute expiry, single use, checked in the callback.
 // The real Google flow needs exactly this, so the demo uses it too.
+// The state is paired with a nonce that only the browser which started the
+// sign-in holds (in a cookie). Checking that the state merely exists is not
+// enough: anyone can mint one, so a crafted callback link would silently sign
+// a victim into the attacker's account. Both halves must match.
 function createOauthState(redirect) {
   purgeOauthStates();
   const state = crypto.randomBytes(24).toString('hex');
+  const nonce = crypto.randomBytes(24).toString('hex');
   db.oauth_states[state] = {
     redirect,
+    nonce,
     created_at: new Date().toISOString(),
     expires: new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString()
   };
   save();
-  return state;
+  return { state, nonce };
 }
+
+function readCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+
+const OAUTH_NONCE_COOKIE = 'sp_oauth';
 
 function peekOauthState(state) {
   const rec = db.oauth_states[state];
@@ -830,8 +848,8 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
-function sendRedirect(res, location) {
-  res.writeHead(302, { Location: location, 'Cache-Control': 'no-store' });
+function sendRedirect(res, location, extraHeaders) {
+  res.writeHead(302, Object.assign({ Location: location, 'Cache-Control': 'no-store' }, extraHeaders || {}));
   res.end();
 }
 
@@ -958,16 +976,29 @@ async function handleApi(req, res, url) {
   /* -- auth: google -- */
   if (method === 'GET' && p === '/api/auth/google/start') {
     const redirect = safeRedirect(url.searchParams.get('redirect'));
-    const state = createOauthState(redirect);
-    if (googleConfigured()) return sendRedirect(res, googleAuthorizeUrl(state, origin));
+    const { state, nonce } = createOauthState(redirect);
+    // Ties this sign-in to this browser. Same-site lax keeps the cookie on the
+    // way back from Google while blocking cross-site attempts to use it.
+    const cookie = OAUTH_NONCE_COOKIE + '=' + nonce +
+      '; Path=/; Max-Age=900; HttpOnly; SameSite=Lax';
+    if (googleConfigured()) {
+      return sendRedirect(res, googleAuthorizeUrl(state, origin), { 'Set-Cookie': cookie });
+    }
     return sendRedirect(res, '/demo-google?state=' + encodeURIComponent(state) +
-      '&redirect=' + encodeURIComponent(redirect));
+      '&redirect=' + encodeURIComponent(redirect), { 'Set-Cookie': cookie });
   }
 
   if (method === 'GET' && p === '/api/auth/google/callback') {
     const state = cleanStr(url.searchParams.get('state'), 100);
     const rec = takeOauthState(state);
     if (!rec) throw new ApiError(400, 'That sign-in link expired. Please start again.');
+    // Existence alone proves nothing: the browser finishing the sign-in has to
+    // be the one that started it, or a crafted link could sign this person
+    // into an account that is not theirs.
+    const nonce = readCookie(req, OAUTH_NONCE_COOKIE);
+    if (!rec.nonce || !nonce || !safeTokenEqual(nonce, rec.nonce)) {
+      throw new ApiError(400, 'That sign-in did not start in this browser. Please try again from the booking page.');
+    }
     if (url.searchParams.get('error')) {
       throw new ApiError(401, 'Google sign-in was cancelled. You can try again or use your email.');
     }
@@ -993,7 +1024,9 @@ async function handleApi(req, res, url) {
     const client = upsertGoogleClient(profile.email, profile.name);
     const token = startSession(client, 'google');
     save();
-    return sendRedirect(res, rec.redirect + '#sp_token=' + token);
+    return sendRedirect(res, rec.redirect + '#sp_token=' + token, {
+      'Set-Cookie': OAUTH_NONCE_COOKIE + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax'
+    });
   }
 
   /* -- auth: email code -- */

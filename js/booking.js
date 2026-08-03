@@ -214,7 +214,7 @@
   // SP.hasToken() is part of the test on purpose: the API client drops the
   // token on any 401, and without this check a stale `me` would keep the
   // account step hidden and lock the client out of booking entirely.
-  const ready = () => !!(SP.hasToken() && me && me.client && me.client.name && !S.pendingProfile && !S.offerPassword);
+  const ready = () => !!(SP.hasToken() && me && me.client && me.client.name && me.client.phone && !S.pendingProfile && !S.offerPassword);
 
   // Session died underneath us (expired, revoked, signed out in another tab).
   // Forget who we thought we were and put the account step back.
@@ -399,7 +399,10 @@
   // it, otherwise drop them on review (booking) or their list.
   function afterAuth() {
     const c = me && me.client;
-    if (c && !c.name) S.pendingProfile = true;
+    // Google hands us a name but never a phone number, and every confirmation
+    // tells the client Ebony will text her. Ask for the number too, or that
+    // promise is empty for anyone who signed in with Google.
+    if (c && (!c.name || !c.phone)) S.pendingProfile = true;
     syncNav();
     if (S.pendingProfile || S.offerPassword) { setSteps(); S.idx = S.steps.indexOf("who"); render(); return; }
     setSteps();
@@ -523,7 +526,17 @@
   let codeInFlight = false;
   async function startCode(email, foot) {
     if (codeInFlight) return;
-    if (!SP.emailLooksOk(email)) { S.authStage = "code"; S.email = email; render(); return; }
+    // Never advance to "check your email" without actually sending one. With a
+    // blank or malformed address this used to show the code screen while no
+    // code was ever sent, leaving the client waiting on an email forever.
+    if (!SP.emailLooksOk(email)) {
+      S.email = email;
+      msg(foot, email ? "That email does not look right. Check it and try again."
+                      : "Enter your email address first and we will send your code.", true);
+      const input = $("#bkEmail");
+      if (input) input.focus();
+      return;
+    }
     codeInFlight = true;
     msg(foot, "Sending your code...");
     const seq = opSeq;
@@ -597,7 +610,7 @@
 
   function rWhoKnown(body, foot) {
     const c = me.client;
-    const needProfile = S.pendingProfile || !c.name;
+    const needProfile = S.pendingProfile || !c.name || !c.phone;
     body.appendChild(el(`<h4>${needProfile ? "Almost there" : "Booking as"}</h4>`));
     if (needProfile) {
       body.appendChild(el(`<div class="field"><label for="bkName">Your name</label><input id="bkName" autocomplete="name" placeholder="First and last" value="${esc(c.name || "")}"></div>`));
@@ -636,6 +649,11 @@
         const name = $("#bkName", body).value.trim();
         if (name.length < 2) { cont.disabled = false; if (skip) skip.disabled = false; return msg(foot, "Tell us your name so Ebony knows who is coming.", true); }
         const phone = $("#bkPhone", body).value.trim();
+        // Required, not optional: every confirmation promises a text.
+        if (phone.replace(/\D/g, "").length < 10) {
+          cont.disabled = false; if (skip) skip.disabled = false;
+          return msg(foot, "Add your cell number so Ebony can text you about your appointment.", true);
+        }
         try {
           const updated = (await SP.updateMe({ name, phone })).client;
           if (stale(seq)) return;

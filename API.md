@@ -30,12 +30,19 @@ where `auth_provider` ∈ `password | google | code`.
   - if the email already has an account: 409 `{error}` with a message pointing
     at log-in or password reset. Never reveal more than that.
 - `POST /api/auth/login` `{email, password}` → `{token, client}`
-  - wrong password OR unknown email both return the same 401 message
-    (no account enumeration). Rate limited: 8 attempts / 15 min per email+IP,
-    then 429 with a wait message.
+  - wrong password OR unknown email both return the same 401 message.
   - if the account exists but has no password yet (created by an older code
     login), respond 409 `{error, needs_password_setup:true}` so the UI can
-    route them through the code flow once and set a password.
+    route them through the code flow once and set a password. This response
+    does reveal that the address has an account, which is why it counts
+    against the rate limit exactly like a failed guess: the disclosure is
+    bounded rather than an unlimited oracle.
+  - Rate limited: 8 attempts / 15 min, tracked per email and per IP. The
+    attempt is recorded BEFORE the password is checked (verifying a hash
+    yields the event loop, so counting afterwards let concurrent guesses all
+    slip past the gate) and forgiven on success, so a client who knows her
+    password is not locked out by someone else guessing from the same network.
+    Over the limit returns 429 with a wait message.
 
 **Google**
 - `GET /api/auth/google/start?redirect=<path>` → 302 to Google's consent screen
@@ -44,6 +51,13 @@ where `auth_provider` ∈ `password | google | code`.
 - `GET /api/auth/google/callback?code=…&state=…` → validates state, exchanges the
   code, upserts the client by verified email, then 302s back to
   `<redirect>#sp_token=<token>` for the frontend to store.
+  - State validation is two-part: the stored state AND a nonce cookie
+    (`sp_oauth`, HttpOnly, SameSite=Lax) set when the sign-in started. Checking
+    only that the state exists is not enough, since anyone can mint one; a
+    crafted callback link would otherwise sign a victim into someone else's
+    account. The cookie is cleared once the sign-in completes.
+  - The demo chooser refuses to issue a session for an admin address, because
+    nothing in it verifies the email the way Google does.
 - Account linking: a Google sign-in whose email matches an existing account
   signs into THAT account (email is verified by Google, so this is safe) and
   leaves any existing password intact.

@@ -40,11 +40,25 @@ Payments land in HER Stripe account (runbook: she creates it; never Nelson's).
 
 ## Auth
 
-- Clients: email + 6-digit one-time code (no passwords — easy + familiar).
-  Demo: the code is shown in the demo outbox. Prod: Supabase Auth email OTP.
-- Ebony/admin: same flow, admin email(s) listed in server config
-  (`ADMIN_EMAILS`). Her real email is still unconfirmed — demo uses
-  `ebony@demo.local`; runbook swaps in her real one.
+Three ways in, all ending at the same `{token, client}`. Full contract in API.md.
+
+- **Google** (primary): one tap, no password to remember. Demo has a clearly
+  labeled stand-in chooser; production uses Supabase Auth's Google provider.
+  A Google sign-in whose verified email matches an existing account signs into
+  that account instead of creating a second one.
+- **Email + password**: scrypt hashes with a per-user salt. Wrong password and
+  unknown email return identical text so nobody can probe who has an account.
+- **Emailed 6-digit code**: the fallback, and how a password gets reset. Demo
+  shows the code in the outbox; production sends it through Supabase.
+
+Sessions last 90 days and slide on use, so repeat clients book without signing
+in again. Changing a password drops every existing session for that account.
+
+The owner account is not claimable by whoever signs up first with her address:
+she signs in with an email code (proving she owns the inbox) and sets a
+password from there. Admin email(s) come from `ADMIN_EMAILS`; her real address
+is still unconfirmed, so the demo uses `ebony@demo.local` and the runbook
+swaps in the real one.
 
 ## Notifications (email now; SMS-ready)
 
