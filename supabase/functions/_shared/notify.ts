@@ -5,7 +5,10 @@
 // are not word-for-word identical, but the POLICY MEANING must always agree:
 // a deposit is always required (some services just do not publish the
 // amount, so Ebony confirms that deposit by text), deposits are due within
-// 24 hours of booking or the appointment is canceled, and a paid-in-full
+// 24 hours of booking or the appointment is canceled, a paid deposit means
+// the time is HELD, the rest can be brought to the appointment or paid
+// online first, a price carrying a plus ("$50+") is settled in person
+// because the final amount depends on the client's hair, and a paid-in-full
 // service owes nothing at the appointment. If you change policy language
 // here, update server/templates.mjs in the same commit. Policy lines come
 // from Ke'Ebonie's own StyleSeat policies (styleseat-reference.md). Never
@@ -20,6 +23,7 @@
 
 import { adminDb } from "./db.ts";
 import { parsePriceCents } from "./catalog.ts";
+import { balanceCentsFor, paidCents } from "./money.ts";
 
 const SITE_NAME = "Sitting Pretty";
 const PHONE_LINE = "Questions? Text Ebony at (817) 704-8300.";
@@ -35,6 +39,11 @@ export interface BookingLike {
   deposit_cents: number | null;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM 24h
+  // Money model (see _shared/money.ts). Optional so callers holding an older
+  // row shape still compile; missing means nothing has been paid yet.
+  paid_cents?: number | null;
+  paid_in_full?: boolean | null;
+  status?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,12 +169,25 @@ function tplBookingRequest(b: BookingLike): RenderedMessage {
   };
 }
 
-function tplBookingConfirmed(b: BookingLike): RenderedMessage {
-  const balanceLine = isPaidInFull(b)
-    ? `Payment received: ${fmtMoney(b.deposit_cents ?? 0)}. You are paid in full. Nothing is due at your appointment.`
-    : b.deposit_cents
-    ? `Deposit received: ${fmtMoney(b.deposit_cents)}. The rest of your ${b.price} balance is due the day of your service.`
-    : `Total: ${b.price}. Your deposit comes off your balance the day of your service.`;
+// The deposit is in, so the time is hers and nobody else can take it. Say that
+// plainly, then say exactly what is still owed and that either way of paying
+// it is fine. The late policy below is her own (styleseat-reference.md); never
+// invent a fee, and never promise a refund.
+function tplBookingConfirmed(b: BookingLike, balanceCents: number | null): RenderedMessage {
+  const heldLine = paidCents(b) > 0
+    ? `Your deposit is paid and this time is now held for you.`
+    : `This time is now held for you.`;
+  const settled = !!b.paid_in_full || isPaidInFull(b);
+  const moneyLine = settled
+    ? `You are paid in full. Nothing is due at your appointment.`
+    : balanceCents != null
+    ? `Balance still due: ${fmtMoney(balanceCents)}. Bring it to your appointment, or sign in any time and pay it online before you come.`
+    : `The final amount depends on your hair, so Ebony settles the rest with you at your appointment.`;
+  const smsMoney = settled
+    ? ` Nothing due at your appointment.`
+    : balanceCents != null
+    ? ` Balance ${fmtMoney(balanceCents)} due at your appointment or online.`
+    : ``;
   return {
     subject: `You are booked: ${b.service_name} on ${fmtDate(b.date)}`,
     emailBody: [
@@ -173,7 +195,8 @@ function tplBookingConfirmed(b: BookingLike): RenderedMessage {
       ``,
       `You are confirmed for ${b.service_name} on ${when(b)}.`,
       ``,
-      balanceLine,
+      heldLine,
+      moneyLine,
       ``,
       `Please come on time. After 15 minutes the appointment is canceled and a $25 rescheduling fee applies before you can book again.`,
       ``,
@@ -182,7 +205,57 @@ function tplBookingConfirmed(b: BookingLike): RenderedMessage {
       `See you soon,`,
       SITE_NAME,
     ].join("\n"),
-    smsBody: `${SITE_NAME}: you are booked. ${b.service_name} on ${when(b)}. See you then!`,
+    smsBody:
+      `${SITE_NAME}: you are booked. ${b.service_name} on ${when(b)}. ` +
+      `Your time is held.${smsMoney}`,
+  };
+}
+
+// The client chose to settle the rest online instead of in the chair.
+function tplBalancePaid(b: BookingLike): RenderedMessage {
+  return {
+    subject: `Paid in full: ${b.service_name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `Hi ${firstName(b)},`,
+      ``,
+      `Your ${b.service_name} on ${when(b)} is now paid in full. Nothing is due at your appointment.`,
+      ``,
+      PHONE_LINE,
+      ``,
+      `See you soon,`,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${SITE_NAME}: ${b.service_name} on ${when(b)} is paid in full. ` +
+      `Nothing due at your appointment.`,
+  };
+}
+
+// Owner alert only. Money landed on an appointment that is not taking any, so
+// Ebony has to decide what to do with it in Stripe. This never goes to the
+// client, so nobody is promised a refund that has not happened.
+function tplPaymentNeedsRefund(b: BookingLike): RenderedMessage {
+  const who = b.client_name?.trim() || b.client_email;
+  return {
+    subject: `Payment received for an appointment that is not open: ${fmtDate(b.date)}`,
+    emailBody: [
+      `Heads up,`,
+      ``,
+      `A payment came through for an appointment that is not taking money:`,
+      ``,
+      b.service_name,
+      when(b),
+      `Client: ${who} (${b.client_email})`,
+      `Status: ${b.status ?? "unknown"}`,
+      ``,
+      `The booking was left exactly as it was. Open this payment in your Stripe`,
+      `dashboard, decide whether to refund it, and let the client know.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${SITE_NAME}: a payment landed for ${who} on ${when(b)}, an appointment ` +
+      `that is not taking money. Check your Stripe dashboard.`,
   };
 }
 
@@ -232,9 +305,13 @@ interface DeliveryResult {
   error?: string;
 }
 
-async function sendEmail(to: string, subject: string, body: string): Promise<DeliveryResult> {
+async function sendEmail(
+  to: string | null,
+  subject: string,
+  body: string,
+): Promise<DeliveryResult> {
   const key = Deno.env.get("RESEND_API_KEY");
-  if (!key) return { status: "logged" };
+  if (!key || !to) return { status: "logged" };
   const from = Deno.env.get("NOTIFY_FROM_EMAIL") ?? "Sitting Pretty <onboarding@resend.dev>";
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -273,7 +350,9 @@ async function sendSms(to: string | null, body: string): Promise<DeliveryResult>
 }
 
 interface Recipient {
-  email: string;
+  // null only for the owner alert when no admin row exists yet. The message is
+  // still rendered and written to notifications_log, never silently dropped.
+  email: string | null;
   phone: string | null;
   client_id: string | null;
   booking_id: string | null;
@@ -334,8 +413,40 @@ export async function notifyBookingRequest(b: BookingLike): Promise<void> {
   await deliver("booking_request", bookingRecipient(b), tplBookingRequest(b));
 }
 
-export async function notifyBookingConfirmed(b: BookingLike): Promise<void> {
-  await deliver("booking_confirmed", bookingRecipient(b), tplBookingConfirmed(b));
+// balanceCents defaults to what the booking itself says is left, so the caller
+// only passes it when it already has the freshly computed number.
+export async function notifyBookingConfirmed(
+  b: BookingLike,
+  balanceCents: number | null = balanceCentsFor(b),
+): Promise<void> {
+  await deliver("booking_confirmed", bookingRecipient(b), tplBookingConfirmed(b, balanceCents));
+}
+
+export async function notifyBalancePaid(b: BookingLike): Promise<void> {
+  await deliver("balance_paid", bookingRecipient(b), tplBalancePaid(b));
+}
+
+// Goes to Ke'Ebonie (clients.is_admin), not to the client.
+export async function notifyPaymentNeedsRefund(b: BookingLike): Promise<void> {
+  const res = await adminDb()
+    .from("clients")
+    .select("id, email, phone")
+    .eq("is_admin", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) console.error("Refund alert: could not load the owner:", res.error.message);
+  const owner = res.data as { id: string; email: string; phone: string | null } | null;
+  await deliver(
+    "payment_needs_refund",
+    {
+      email: owner?.email ?? null,
+      phone: owner?.phone ?? null,
+      client_id: owner?.id ?? null,
+      booking_id: b.id,
+    },
+    tplPaymentNeedsRefund(b),
+  );
 }
 
 export async function notifyBookingCanceled(

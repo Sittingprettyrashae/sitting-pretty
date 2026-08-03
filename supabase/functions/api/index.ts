@@ -19,7 +19,12 @@
 
 import { corsHeaders, errorResponse, HttpError } from "../_shared/http.ts";
 import { handleAuth } from "./auth.ts";
-import { handleAvailability, handleCreateBooking, handleServices } from "./bookings.ts";
+import {
+  handleAvailability,
+  handleCreateBooking,
+  handlePayBalance,
+  handleServices,
+} from "./bookings.ts";
 import { handleMe } from "./me.ts";
 import { handleCancel } from "./cancel.ts";
 import { handleAdmin } from "./admin.ts";
@@ -43,6 +48,11 @@ Deno.serve(async (req: Request) => {
 
     const cancelMatch = path.match(/^\/bookings\/([^/]+)\/cancel$/);
     if (req.method === "POST" && cancelMatch) return await handleCancel(req, cancelMatch[1]);
+
+    const payBalanceMatch = path.match(/^\/bookings\/([^/]+)\/pay-balance$/);
+    if (req.method === "POST" && payBalanceMatch) {
+      return await handlePayBalance(req, payBalanceMatch[1]);
+    }
 
     if (req.method === "POST" && path === "/stripe/webhook") {
       return await handleStripeWebhook(req);

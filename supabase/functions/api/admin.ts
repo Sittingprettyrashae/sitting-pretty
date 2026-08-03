@@ -4,7 +4,8 @@
 
 import { requireAdmin } from "../_shared/auth.ts";
 import { adminDb } from "../_shared/db.ts";
-import { HttpError, json, readJson } from "../_shared/http.ts";
+import { HttpError, json, readJson, readJsonOptional } from "../_shared/http.ts";
+import { balanceCentsFor, paidCents, withMoney, withMoneyAll } from "../_shared/money.ts";
 import {
   notifyBookingCanceled,
   notifyBookingConfirmed,
@@ -21,6 +22,10 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   const statusMatch = path.match(/^\/admin\/bookings\/([^/]+)\/status$/);
   if (req.method === "POST" && statusMatch) {
     return await setBookingStatus(req, statusMatch[1]);
+  }
+  const markPaidMatch = path.match(/^\/admin\/bookings\/([^/]+)\/mark-paid$/);
+  if (req.method === "POST" && markPaidMatch) {
+    return await markPaid(req, markPaidMatch[1]);
   }
   if (path === "/admin/blocked-days") {
     if (req.method === "GET") return json({ days: await blockedDays() });
@@ -54,7 +59,50 @@ async function listBookings(url: URL): Promise<Response> {
   if (status) query = query.eq("status", status);
   const res = await query;
   if (res.error) throw new HttpError(500, "Could not load bookings");
-  return json({ bookings: res.data ?? [] });
+  return json({ bookings: withMoneyAll(res.data ?? []) });
+}
+
+// POST /admin/bookings/:id/mark-paid { amount_cents? } -> { booking }
+//
+// Ebony settled up with the client in the chair: cash, Zelle, her card reader,
+// however she took it. Mirrors the demo route in server/server.mjs.
+// amount_cents is for the services whose final price depends on the hair
+// ("$50+"), where there is no computed balance to settle; otherwise the known
+// balance is what gets recorded.
+async function markPaid(req: Request, bookingId: string): Promise<Response> {
+  const body = await readJsonOptional(req);
+  const db = adminDb();
+
+  const found = await db.from("bookings").select("*").eq("id", bookingId).maybeSingle();
+  if (found.error) throw new HttpError(500, "Could not load the booking");
+  const booking = found.data;
+  if (!booking) throw new HttpError(404, "Booking not found");
+  if (booking.status === "canceled") throw new HttpError(409, "That appointment was cancelled.");
+
+  const supplied = body.amount_cents;
+  const amount = typeof supplied === "number" && Number.isFinite(supplied) && supplied > 0
+    ? Math.round(supplied)
+    : balanceCentsFor(booking);
+
+  const patch: Record<string, unknown> = {
+    paid_cents: paidCents(booking) + (amount ?? 0),
+    paid_in_full: true,
+    paid_in_person: true,
+  };
+  // Money in hand also settles the question of whether the appointment is on.
+  if (booking.status === "awaiting_deposit" || booking.status === "request") {
+    patch.status = "confirmed";
+  }
+
+  const updated = await db
+    .from("bookings")
+    .update(patch)
+    .eq("id", bookingId)
+    .select("*")
+    .single();
+  if (updated.error) throw new HttpError(500, "Could not record the payment");
+
+  return json({ booking: withMoney(updated.data) });
 }
 
 async function setBookingStatus(req: Request, bookingId: string): Promise<Response> {
@@ -69,7 +117,7 @@ async function setBookingStatus(req: Request, bookingId: string): Promise<Respon
   if (found.error) throw new HttpError(500, "Could not load the booking");
   if (!found.data) throw new HttpError(404, "Booking not found");
   const before = found.data;
-  if (before.status === status) return json({ booking: before });
+  if (before.status === status) return json({ booking: withMoney(before) });
 
   const patch: Record<string, unknown> = { status };
   if (status === "canceled") patch.canceled_by = "admin";
@@ -86,7 +134,7 @@ async function setBookingStatus(req: Request, bookingId: string): Promise<Respon
   // as a paid deposit.
   if (status === "confirmed") await notifyBookingConfirmed(updated.data);
 
-  return json({ booking: updated.data });
+  return json({ booking: withMoney(updated.data) });
 }
 
 async function blockedDays(): Promise<Array<{ date: string; reason: string }>> {

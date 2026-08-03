@@ -88,24 +88,75 @@ where `auth_provider` ∈ `password | google | code`.
   `/demo-checkout?session=<id>`).
 - `POST /api/bookings/:id/cancel` (auth; owner or admin) → `{booking}` —
   sets `canceled`, records who, sends cancellation notification.
+- `POST /api/bookings/:id/pay-balance` (auth; owner or admin) →
+  `{checkout_url, amount_cents}` — Stripe Checkout for the rest of the price,
+  for a client who would rather not settle up in the chair. `amount_cents` is
+  the booking's `balance_cents`; the session carries `metadata.kind=balance`
+  and `metadata.booking_id`. Refusals, all 409:
+  - cancelled appointment → "That appointment was cancelled."
+  - still `awaiting_deposit` → "Pay the deposit first, then the rest can be
+    paid any time." (the deposit is what holds the time)
+  - already settled → "This one is already paid in full."
+  - variable price → "The final amount for this service depends on your hair,
+    so Ebony settles it with you in person."
 
 Booking object:
 `{id, client_id, client_name, client_email, client_phone, service_id, service_name,
   price, deposit_cents, date, time, duration_min, status, notes, created_at,
-  canceled_by?}`
+  canceled_by?, deposit_paid_at?}`
 status ∈ `awaiting_deposit | request | confirmed | completed | canceled`.
+
+Money fields, on every Booking the API returns:
+- `paid_cents` int — everything that has landed: deposit, online balance, and
+  anything collected in person. Stored, only ever added to.
+- `total_cents` int|null — the full price in cents, DERIVED from the price
+  string. `null` when the price is variable (see below).
+- `balance_cents` int|null — `total_cents - paid_cents` when that is positive,
+  the price is fixed, and the booking is not already paid in full. Otherwise
+  `null`, which means there is nothing to offer online. DERIVED.
+- `paid_in_full` bool — true once `paid_cents >= total_cents`, or the moment
+  the owner records an in-person payment.
+- `paid_in_person` bool — the owner took the rest herself (cash, Zelle, card
+  reader), recorded via `mark-paid`.
+
+**Variable-price rule.** A price carrying a plus (`"$50+"`) means the final
+amount depends on the client's hair, length, or add-ons. Those bookings have
+`total_cents: null` and `balance_cents: null`, are NEVER offered a fixed online
+balance, and are settled with Ebony in person. Only `mark-paid` with an explicit
+`amount_cents` can record what one of them actually cost.
+
+Payment effects:
+- deposit paid → status `confirmed`, `deposit_paid_at` set, deposit added to
+  `paid_cents`, confirmation notification (states the time is held and what is
+  still owed).
+- balance paid → added to `paid_cents`, `paid_in_full` true, paid-in-full
+  notification.
 
 ## Payments
 - `GET /api/checkout/:session_id` → `{booking, amount_cents, service_name}` (demo checkout page data)
 - `POST /api/checkout/:session_id/pay` → `{ok, booking}` — DEMO ONLY simulated
   payment success; marks deposit paid → `confirmed`, sends confirmation.
 - `POST /api/stripe/webhook` — production path (checkout.session.completed →
-  same transition). Mock accepts it too for parity testing.
+  same transition). Mock accepts it too for parity testing. The session's
+  `metadata.kind` selects the path: `balance` applies a balance payment,
+  anything else (including sessions predating the field) is the deposit.
+  Production verifies the Stripe signature, requires `payment_status: "paid"`,
+  requires `amount_total` to equal what was expected for that kind (the
+  `deposit_cents`, or the computed `balance_cents`), is idempotent on replay,
+  and alerts the owner to refund in Stripe when money lands on a booking that
+  is not taking any. A mismatch changes nothing.
 
 ## Admin (auth + is_admin, else 403)
 - `GET /api/admin/bookings?from=&to=&status=` → `{bookings:[Booking]}` (all, filterable)
 - `POST /api/admin/bookings/:id/status` `{status}` → `{booking}` — allowed:
   confirmed, completed, canceled (canceled sends notification to client).
+- `POST /api/admin/bookings/:id/mark-paid` `{amount_cents?}` → `{booking}` —
+  she settled up with the client in person. Records `amount_cents` when given
+  (required in practice for variable prices, which have no computed balance),
+  otherwise the booking's `balance_cents`. Adds it to `paid_cents`, sets
+  `paid_in_full` and `paid_in_person`, and promotes `awaiting_deposit` or
+  `request` to `confirmed`. 409 on a cancelled appointment. No client
+  notification: she is standing right there.
 - `GET /api/admin/blocked-days` → `{days:[{date,reason}]}`
 - `POST /api/admin/blocked-days` `{date, reason?}` → `{days}` (idempotent)
 - `DELETE /api/admin/blocked-days/:date` → `{days}`

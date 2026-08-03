@@ -36,3 +36,17 @@ export async function readJson(req: Request): Promise<Record<string, unknown>> {
     throw new HttpError(400, "Invalid JSON body");
   }
 }
+
+// Same as readJson, except no body at all is an empty object. For endpoints
+// whose fields are ALL optional, where sending nothing is a valid request.
+export async function readJsonOptional(req: Request): Promise<Record<string, unknown>> {
+  const raw = (await req.text()).trim();
+  if (!raw) return {};
+  try {
+    const body = JSON.parse(raw);
+    if (body === null || typeof body !== "object") throw new Error("not an object");
+    return body as Record<string, unknown>;
+  } catch {
+    throw new HttpError(400, "Invalid JSON body");
+  }
+}

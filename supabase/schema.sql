@@ -91,6 +91,65 @@ create table if not exists public.bookings (
   created_at timestamptz not null default now()
 );
 
+-- ---------------------------------------------------------------------------
+-- Deposit + balance money model (parity with server/server.mjs).
+--
+-- paid_cents      every dollar that has landed for this appointment: the
+--                 deposit, an online balance payment, and anything Ebony
+--                 collected in person. Only ever added to.
+-- paid_in_full    true once paid_cents covers the price, or the moment Ebony
+--                 records that she settled up with the client herself.
+-- paid_in_person  she took the rest in the chair (cash, Zelle, her card
+--                 reader), so the dashboard can say so.
+-- balance_session_id  the Stripe Checkout session for the balance, kept apart
+--                 from stripe_session_id (the deposit) so the webhook can tell
+--                 a replay of a session it already applied from a second,
+--                 genuinely duplicate payment.
+--
+-- total and balance are NOT stored. They are derived from the price string in
+-- _shared/money.ts, so they can never drift from the payments above. A price
+-- carrying a plus ("$50+") has no fixed total and is settled in person.
+-- ---------------------------------------------------------------------------
+alter table public.bookings
+  add column if not exists paid_cents integer not null default 0;
+alter table public.bookings
+  add column if not exists paid_in_full boolean not null default false;
+alter table public.bookings
+  add column if not exists paid_in_person boolean not null default false;
+alter table public.bookings
+  add column if not exists balance_session_id text;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'bookings_paid_cents_check'
+  ) then
+    alter table public.bookings add constraint bookings_paid_cents_check
+      check (paid_cents >= 0);
+  end if;
+end $$;
+
+-- One-time backfill, safe to re-run. A booking confirmed before these columns
+-- existed already took its deposit; without this it would look unpaid and the
+-- client would be asked for the full price a second time.
+update public.bookings
+   set paid_cents = deposit_cents
+ where deposit_paid_at is not null
+   and deposit_cents is not null
+   and paid_cents = 0;
+
+-- Same idea for the services that charge the whole price up front: once
+-- paid_cents covers a fixed price, nothing is owed.
+update public.bookings
+   set paid_in_full = true
+ where paid_in_full = false
+   and price !~ '\+'
+   and price ~ '\d'
+   and paid_cents > 0
+   -- numeric, not int: a price string can never overflow it, so this cannot
+   -- fail on odd data. Same first-digit-run rule as totalCentsFor().
+   and paid_cents >= (substring(price from '\d+')::numeric * 100);
+
 -- bookings_overlap: the DATABASE-LEVEL "one client at a time" guarantee.
 -- bookings.ts checks availability before inserting, but two truly
 -- simultaneous requests can both pass that check. This exclusion constraint
@@ -358,6 +417,7 @@ end $$;
 create index if not exists bookings_date_status_idx on public.bookings (date, status);
 create index if not exists bookings_client_created_idx on public.bookings (client_id, created_at desc);
 create index if not exists bookings_stripe_session_idx on public.bookings (stripe_session_id);
+create index if not exists bookings_balance_session_idx on public.bookings (balance_session_id);
 create index if not exists notifications_log_booking_idx on public.notifications_log (booking_id);
 create index if not exists notifications_log_created_idx on public.notifications_log (created_at desc);
 

@@ -1,4 +1,5 @@
-// Client booking endpoints: GET /services, GET /availability, POST /bookings.
+// Client booking endpoints: GET /services, GET /availability, POST /bookings,
+// POST /bookings/:id/pay-balance.
 // Booking rules per ARCHITECTURE.md: Sun closed, Mon-Fri 09:00-20:00,
 // Sat 09:00-18:00, 30 min slot step, a service blocks its full duration,
 // last start = close - duration, one client at a time, blocked days remove
@@ -8,6 +9,7 @@ import { requireClient } from "../_shared/auth.ts";
 import { parsePriceCents, SERVICES_BY_ID, servicesPayload } from "../_shared/catalog.ts";
 import { adminDb } from "../_shared/db.ts";
 import { HttpError, json, readJson } from "../_shared/http.ts";
+import { balanceCentsFor, withMoney } from "../_shared/money.ts";
 import { notifyBookingCreated, notifyBookingRequest } from "../_shared/notify.ts";
 import { getStripe } from "../_shared/stripe.ts";
 
@@ -193,7 +195,8 @@ export async function handleCreateBooking(req: Request): Promise<Response> {
             },
           },
         ],
-        metadata: { booking_id: booking.id },
+        // kind tells the webhook which half of the money model this session is.
+        metadata: { booking_id: booking.id, kind: "deposit" },
         success_url: `${siteUrl}/?booking=${booking.id}&paid=1`,
         cancel_url: `${siteUrl}/?booking=${booking.id}&paid=0`,
       });
@@ -217,5 +220,79 @@ export async function handleCreateBooking(req: Request): Promise<Response> {
     await notifyBookingRequest(booking);
   }
 
-  return json({ booking, checkout_url: checkoutUrl });
+  return json({ booking: withMoney(booking), checkout_url: checkoutUrl });
+}
+
+// POST /api/bookings/:id/pay-balance (auth; owner or admin)
+// -> { checkout_url, amount_cents }
+//
+// The client would rather settle the rest online than in the chair. Rules and
+// wording mirror the demo route in server/server.mjs:
+//  - a cancelled appointment takes no money at all
+//  - the deposit comes first, it is what holds the time
+//  - nothing to charge when it is already paid in full
+//  - a variable price ("$50+") has no fixed number, so it is never charged
+//    online; Ebony settles that one in person
+export async function handlePayBalance(req: Request, bookingId: string): Promise<Response> {
+  const client = await requireClient(req);
+  const db = adminDb();
+
+  const found = await db.from("bookings").select("*").eq("id", bookingId).maybeSingle();
+  if (found.error) throw new HttpError(500, "Could not load the booking");
+  const booking = found.data;
+  if (!booking) throw new HttpError(404, "Booking not found");
+  if (booking.client_id !== client.id && !client.is_admin) {
+    throw new HttpError(403, "Not your booking");
+  }
+  if (booking.status === "canceled") throw new HttpError(409, "That appointment was cancelled.");
+  if (booking.status === "awaiting_deposit") {
+    throw new HttpError(409, "Pay the deposit first, then the rest can be paid any time.");
+  }
+  if (booking.paid_in_full) throw new HttpError(409, "This one is already paid in full.");
+
+  const balance = balanceCentsFor(booking);
+  if (balance == null) {
+    throw new HttpError(
+      409,
+      "The final amount for this service depends on your hair, so Ebony settles it with you in person.",
+    );
+  }
+
+  const siteUrl = (Deno.env.get("SITE_URL") ?? "").replace(/\/$/, "");
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    customer_email: booking.client_email,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          unit_amount: balance,
+          product_data: {
+            name: `${booking.service_name} balance`,
+            description: `${booking.date} at ${booking.time} with Ebony at Sitting Pretty`,
+          },
+        },
+      },
+    ],
+    // kind=balance is what makes the webhook apply this as a balance payment
+    // instead of a deposit.
+    metadata: { booking_id: booking.id, kind: "balance" },
+    success_url: `${siteUrl}/?booking=${booking.id}&paid=1`,
+    cancel_url: `${siteUrl}/?booking=${booking.id}&paid=0`,
+  });
+
+  // Recorded so the webhook can tell a replay of this session from a second,
+  // genuinely duplicate payment. The money still lands if this write fails,
+  // and the webhook verifies the amount either way, so do not fail the call.
+  const stored = await db
+    .from("bookings")
+    .update({ balance_session_id: session.id })
+    .eq("id", booking.id);
+  if (stored.error) {
+    console.error(`Could not store balance_session_id for ${booking.id}:`, stored.error.message);
+  }
+
+  return json({ checkout_url: session.url, amount_cents: balance });
 }

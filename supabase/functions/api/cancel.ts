@@ -4,6 +4,7 @@
 import { requireClient } from "../_shared/auth.ts";
 import { adminDb } from "../_shared/db.ts";
 import { HttpError, json } from "../_shared/http.ts";
+import { withMoney } from "../_shared/money.ts";
 import { notifyBookingCanceled } from "../_shared/notify.ts";
 
 export async function handleCancel(req: Request, bookingId: string): Promise<Response> {
@@ -18,7 +19,7 @@ export async function handleCancel(req: Request, bookingId: string): Promise<Res
   const isOwner = booking.client_id === client.id;
   if (!isOwner && !client.is_admin) throw new HttpError(403, "Not your booking");
 
-  if (booking.status === "canceled") return json({ booking });
+  if (booking.status === "canceled") return json({ booking: withMoney(booking) });
 
   const canceledBy: "client" | "admin" = isOwner ? "client" : "admin";
   const updated = await db
@@ -30,5 +31,5 @@ export async function handleCancel(req: Request, bookingId: string): Promise<Res
   if (updated.error) throw new HttpError(500, "Could not cancel the booking");
 
   await notifyBookingCanceled(updated.data, canceledBy);
-  return json({ booking: updated.data });
+  return json({ booking: withMoney(updated.data) });
 }

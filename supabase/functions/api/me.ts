@@ -4,6 +4,7 @@
 import { requireClient } from "../_shared/auth.ts";
 import { adminDb } from "../_shared/db.ts";
 import { HttpError, json, readJson } from "../_shared/http.ts";
+import { withMoneyAll } from "../_shared/money.ts";
 
 export async function handleMe(req: Request): Promise<Response> {
   const client = await requireClient(req);
@@ -16,7 +17,9 @@ export async function handleMe(req: Request): Promise<Response> {
       .eq("client_id", client.id)
       .order("created_at", { ascending: false });
     if (res.error) throw new HttpError(500, "Could not load your bookings");
-    return json({ client, bookings: res.data ?? [] });
+    // Every booking carries what is paid and what is left (_shared/money.ts),
+    // so the dashboard never has to do money math of its own.
+    return json({ client, bookings: withMoneyAll(res.data ?? []) });
   }
 
   if (req.method === "POST") {
