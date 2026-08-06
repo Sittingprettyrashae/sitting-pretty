@@ -163,7 +163,18 @@ export function parseHoursInput(body: Record<string, unknown>): DayHours[] {
   if (byDay.size !== 7) {
     throw new HttpError(400, "Send all seven days, Sunday through Saturday.");
   }
-  return [0, 1, 2, 3, 4, 5, 6].map((w) => byDay.get(w)!);
+  const week = [0, 1, 2, 3, 4, 5, 6].map((w) => byDay.get(w)!);
+  // Closing every day takes her off the market entirely: the booking page
+  // would offer nothing and no client could reach her, with no error to
+  // explain why. Time off is what blocking individual days is for.
+  if (week.every((d) => d.closed)) {
+    throw new HttpError(
+      400,
+      "That closes every day of the week, so nobody could book you at all. " +
+        "Leave at least one day open, or block individual days on your calendar for time off.",
+    );
+  }
+  return week;
 }
 
 export async function writeHours(days: DayHours[]): Promise<DayHours[]> {

@@ -279,7 +279,16 @@ function parseHoursPayload(days) {
   if (missing.length) {
     throw new ApiError(400, 'Please include every day. Missing: ' + missing.join(', ') + '.');
   }
-  return [0, 1, 2, 3, 4, 5, 6].map((weekday) => seen.get(weekday));
+  const week = [0, 1, 2, 3, 4, 5, 6].map((weekday) => seen.get(weekday));
+  // Closing every day takes her off the market entirely: the booking page
+  // would offer nothing and no client could reach her, with no error to
+  // explain why. Time off is what Block this day is for.
+  if (week.every((d) => d.closed)) {
+    throw new ApiError(400,
+      'That closes every day of the week, so nobody could book you at all. ' +
+      'Leave at least one day open, or block individual days on your calendar for time off.');
+  }
+  return week;
 }
 
 // Appointments already on the books are promises. Changing hours never cancels,

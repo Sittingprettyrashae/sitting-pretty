@@ -29,6 +29,19 @@ const TOO_BIG = "That flyer is too big. Pick one under 5 MB.";
 const WRONG_TYPE = "That flyer has to be a JPG, PNG, or WEBP picture.";
 const UNREADABLE = "That flyer did not come through. Attach it again.";
 
+/** What the bytes actually are, from their magic number, or null if unknown. */
+function sniffImageType(buf: Uint8Array): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (
+    buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e &&
+    buf[3] === 0x47 && buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a
+  ) return "image/png";
+  const ascii = (from: number, to: number) =>
+    String.fromCharCode(...buf.subarray(from, to));
+  if (buf.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
 /**
  * Takes a `data:image/jpeg;base64,...` URL, returns the public URL of the
  * stored file. Throws HttpError(400) with a plain message when the picture is
@@ -61,6 +74,12 @@ export async function storeFlyer(dataUrl: string): Promise<string> {
   }
   if (bytes.length === 0) throw new HttpError(400, UNREADABLE);
   if (bytes.length > MAX_FLYER_BYTES) throw new HttpError(400, TOO_BIG);
+
+  // The declared type is just a claim in a string the caller wrote. Check the
+  // actual bytes, so a file that says image/png but is not one never gets
+  // stored and handed back as a link her clients open. The demo server does
+  // the same check; the two must not disagree about what is safe to store.
+  if (sniffImageType(bytes) !== mime) throw new HttpError(400, WRONG_TYPE);
 
   // Random name, never anything she typed: a filename built from her subject
   // line would be guessable and could collide.

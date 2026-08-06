@@ -206,6 +206,9 @@ textarea.field{resize:vertical;min-height:8.5rem;line-height:1.5}
 button.cal-day:hover{border-color:var(--rose)}
 .cal-empty{aspect-ratio:1}
 .cal-closed{background:var(--surface-2);border-style:dashed;color:var(--ink-faint);cursor:default}
+/* A day she has closed that still has appointments on it. Dashed like the rest
+   of her closed days, but live: those clients are still expecting her. */
+.cal-closed-kept{border-style:dashed;border-color:var(--rose);background:var(--rose-soft)}
 .cal-closed-label{font-size:.5rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .cal-blocked{
   background:repeating-linear-gradient(-45deg, var(--surface-2) 0 5px, var(--surface) 5px 11px);
@@ -379,7 +382,7 @@ button.cal-day:hover{border-color:var(--rose)}
 .flyer-name{font-weight:900;font-size:.9rem;overflow-wrap:anywhere}
 .flyer-size{font-size:.8rem;color:var(--ink-faint);margin-bottom:.5rem}
 .pv-flyer{
-  width:100%;max-height:11rem;object-fit:cover;border-radius:.7rem;
+  width:100%;max-height:11rem;object-fit:contain;background:var(--surface-2);border-radius:.7rem;
   border:1px solid var(--line);margin-top:.5rem;
 }
 .sms-flyer{font-size:.86rem;color:var(--ink-dim);margin-top:.35rem}

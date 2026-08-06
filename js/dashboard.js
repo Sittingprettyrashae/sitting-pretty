@@ -488,16 +488,22 @@
       var n = counts[dateStr] || 0;
       var isBlocked = !!blocked[dateStr];
       // Closed days come from her hours record, so changing them changes this.
-      if (closedWeekday(dow)) {
+      // A closed day with appointments still on it must stay openable: those
+      // were promised to a client before she closed the day, and hiding them
+      // is how she would miss someone who is still expecting her.
+      if (closedWeekday(dow) && !n) {
         html += '<div class="cal-day cal-closed"><span class="cal-num">' + day + '</span><span class="cal-closed-label">closed</span><span class="sr-only">' + esc(fmtDateLong(dateStr)) + ", closed</span></div>";
         continue;
       }
+      var closedWithWork = closedWeekday(dow);
       var cls = "cal-day";
       if (isBlocked) cls += " cal-blocked";
+      if (closedWithWork) cls += " cal-closed-kept";
       if (dateStr === t) cls += " cal-today";
       if (dateStr === state.selectedDay) cls += " cal-selected";
       var label = fmtDateLong(dateStr) + ", " +
         (n === 0 ? "no bookings" : n + (n === 1 ? " booking" : " bookings")) +
+        (closedWithWork ? ", day closed but still booked" : "") +
         (isBlocked ? ", blocked" : "");
       var dots = "";
       if (n > 0 && n <= 3) {
@@ -652,7 +658,10 @@
 
   function updateHoursButtons() {
     var changed = hoursChanged();
-    $("hours-save").disabled = state.hoursSaving || !changed;
+    // hoursLoaded false means we are showing placeholder hours, not hers.
+    // Saving then would write a week she never set over her real one.
+    var ready = state.hoursLoaded !== false;
+    $("hours-save").disabled = state.hoursSaving || !changed || !ready;
     $("hours-cancel").disabled = state.hoursSaving || !changed;
   }
 
@@ -747,6 +756,12 @@
 
   function hoursProblem() {
     var days = state.hoursDraft || [];
+    var open = 0;
+    for (var k = 0; k < days.length; k++) if (!days[k].closed) open++;
+    if (!open) {
+      return "That closes every day of the week, so nobody could book you at all. " +
+        "Leave at least one day open, or use Block this day on your calendar for time off.";
+    }
     for (var i = 0; i < days.length; i++) {
       var d = days[i];
       if (d.closed) continue;
@@ -787,7 +802,7 @@
     var n = list.length;
     var html = '<div class="affected-box"><h3>' + n +
       (n === 1 ? " appointment is" : " appointments are") + " already booked outside your new hours</h3>";
-    html += '<p class="affected-note">Nothing was canceled. These appointments are still on the books, at the same time as before. If you want to move one, text the client and pick a new time together.</p>';
+    html += '<p class="affected-note">Nothing was canceled. These appointments are still on the books, at the same time as before. These are still on your books. Text the client if you need to work something out.</p>';
     html += '<ul class="affected-list">';
     list.forEach(function (b) {
       var who = b.client_name || b.client_email || "Client";
@@ -859,12 +874,20 @@
       renderHours();
       renderCalendar();
     }).catch(function () {
-      // Show her real week either way, so the page is never blank.
+      // Never pass the built-in defaults off as her saved hours. Saving is a
+      // whole-week write, so if she edited one day on top of a fabricated week
+      // she would overwrite her real schedule with hours she never set. Show
+      // the defaults only as a clearly-labelled placeholder, and refuse to
+      // save until we have actually read her hours back.
+      state.hoursLoaded = false;
       if (!state.hours) {
-        state.hours = normalizeHours(null);
-        state.hoursDraft = normalizeHours(state.hours);
+        state.hoursDraft = normalizeHours(null);
         renderHours();
       }
+      setHoursError(
+        "We could not load your saved hours just now, so this is only a placeholder. " +
+        "Saving is turned off until they load. Check your connection and tap Retry."
+      );
     });
   }
 
@@ -990,7 +1013,9 @@
       return;
     }
     $("bc-flyer-busy").hidden = false;
+    state.flyerBusy = true;
     var fail = function (msg) {
+      state.flyerBusy = false;
       $("bc-flyer-busy").hidden = true;
       $("bc-image").value = "";
       setFlyerError(msg);
@@ -1000,6 +1025,7 @@
     reader.onload = function () {
       var img = new Image();
       img.onload = function () {
+        state.flyerBusy = false;
         $("bc-flyer-busy").hidden = true;
         var url = shrinkToDataUrl(img);
         if (!url) { fail("That picture is too big to send. Try a smaller one."); return; }
@@ -1078,6 +1104,12 @@
         $("bc-result").hidden = false;
         toast(line);
         if (state.outboxAvailable) refreshOutbox();
+        // Clear the composer. Leaving it loaded made it far too easy to tap
+        // send twice and blast every client the same message again.
+        $("bc-subject").value = "";
+        $("bc-message").value = "";
+        clearFlyer();
+        updatePreview();
         resetSendUI();
       })
       .catch(function (err) {
@@ -1424,6 +1456,10 @@
     $("bc-send").addEventListener("click", function () {
       var subject = $("bc-subject").value.trim();
       var message = $("bc-message").value.trim();
+      if (state.flyerBusy) {
+        toast("Your flyer is still loading. Give it a second, then send.");
+        return;
+      }
       if (!subject) {
         toast("Add a subject so your clients know what it is about.");
         $("bc-subject").focus();
