@@ -1,61 +1,23 @@
-// Client booking endpoints: GET /services, GET /availability, POST /bookings,
-// POST /bookings/:id/pay-balance.
-// Booking rules per ARCHITECTURE.md: Sun closed, Mon-Fri 09:00-20:00,
-// Sat 09:00-18:00, 30 min slot step, a service blocks its full duration,
-// last start = close - duration, one client at a time, blocked days remove
-// the whole day. All times are America/Chicago.
+// Client booking endpoints: GET /services, GET /hours, GET /availability,
+// POST /bookings, POST /bookings/:id/pay-balance.
+// Booking rules per ARCHITECTURE.md: 30 min slot step, a service blocks its
+// full duration, last start = close - duration, one client at a time, blocked
+// days remove the whole day. All times are America/Chicago.
+//
+// The open and close times themselves are NOT in this file. They live in the
+// public.hours table and she edits them from her dashboard, so a day she
+// closes stops being offered here the moment she saves it.
 
 import { requireClient } from "../_shared/auth.ts";
 import { parsePriceCents, SERVICES_BY_ID, servicesPayload } from "../_shared/catalog.ts";
 import { adminDb } from "../_shared/db.ts";
+import { chicagoNow, hhmmToMin, minToHhmm, readDayHours, readHours } from "../_shared/hours.ts";
 import { HttpError, json, readJson } from "../_shared/http.ts";
 import { balanceCentsFor, withMoney } from "../_shared/money.ts";
 import { notifyBookingCreated, notifyBookingRequest } from "../_shared/notify.ts";
 import { getStripe } from "../_shared/stripe.ts";
 
 const SLOT_STEP_MIN = 30;
-
-// Open minutes per weekday (0 = Sunday). null = closed.
-const HOURS: Record<number, [number, number] | null> = {
-  0: null,
-  1: [9 * 60, 20 * 60],
-  2: [9 * 60, 20 * 60],
-  3: [9 * 60, 20 * 60],
-  4: [9 * 60, 20 * 60],
-  5: [9 * 60, 20 * 60],
-  6: [9 * 60, 18 * 60],
-};
-
-function hhmmToMin(hhmm: string): number {
-  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
-  return h * 60 + m;
-}
-
-function minToHhmm(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
-}
-
-// Current date + minutes-since-midnight in America/Chicago, so "today"
-// filtering matches salon time no matter where the edge function runs.
-function chicagoNow(): { date: string; minutes: number } {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Chicago",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(new Date())
-      .map((p) => [p.type, p.value]),
-  );
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    minutes: parseInt(parts.hour, 10) * 60 + parseInt(parts.minute, 10),
-  };
-}
 
 interface Availability {
   date: string;
@@ -71,8 +33,10 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
 
   // Weekday of the calendar date (timezone-safe: UTC midnight of that date).
   const weekday = new Date(date + "T00:00:00Z").getUTCDay();
-  const hours = HOURS[weekday];
-  if (!hours) return { date, closed: true, blocked: false, slots: [] };
+  const hours = await readDayHours(weekday);
+  if (hours.closed || !hours.open || !hours.close) {
+    return { date, closed: true, blocked: false, slots: [] };
+  }
 
   const db = adminDb();
   const blockedRes = await db.from("blocked_days").select("date").eq("date", date).maybeSingle();
@@ -93,7 +57,8 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
   const now = chicagoNow();
   if (date < now.date) return { date, closed: false, blocked: false, slots: [] };
 
-  const [open, close] = hours;
+  const open = hhmmToMin(hours.open);
+  const close = hhmmToMin(hours.close);
   const slots: string[] = [];
   for (let start = open; start + service.duration_min <= close; start += SLOT_STEP_MIN) {
     if (date === now.date && start <= now.minutes) continue;
@@ -106,6 +71,13 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
 
 export function handleServices(): Response {
   return json(servicesPayload());
+}
+
+// GET /api/hours (public). The public site prints this, so it is the same
+// record the availability engine above reads. Nothing here is secret: these
+// are the hours she wants the world to see.
+export async function handleHours(): Promise<Response> {
+  return json({ days: await readHours() });
 }
 
 export async function handleAvailability(url: URL): Promise<Response> {

@@ -76,16 +76,58 @@ where `auth_provider` ∈ `password | google | code`.
 - `GET /api/me` (auth) → `{client, bookings:[Booking]}` (their bookings, newest first)
 - `POST /api/me` (auth) `{name?, phone?}` → `{client}` — update profile.
 
+## Hours (she owns her own schedule)
+
+Hours are DATA, not code. One source of truth: the availability engine, the
+dashboard, and the hours table on the public site all read the same record, so
+her site can never advertise hours she does not actually work.
+
+- `GET /api/hours` (public) → `{days:[{weekday, closed, open, close}]}`
+  `weekday` 0=Sunday..6=Saturday, `open`/`close` are `"HH:MM"` 24h, and are
+  null when `closed` is true. Always returns all 7 days in weekday order.
+- `GET /api/admin/hours` (admin) → same shape.
+- `PUT /api/admin/hours` (admin) `{days:[{weekday, closed, open?, close?}]}` →
+  `{days}`. Validation: every weekday 0..6 present exactly once, `open` before
+  `close`, times on the half hour. Rejects with 400 and a plain message.
+
+**Changing hours never touches existing bookings.** If she narrows a day,
+appointments already on the books stay exactly where they are: they were
+promised to a client. New bookings simply cannot be made outside the new hours.
+The response includes `affected:[Booking]` listing any non-canceled future
+bookings that now fall outside her hours, so the dashboard can show her which
+ones to move or keep. Defaults if she never touches it: Sunday closed,
+Monday to Friday 09:00-20:00, Saturday 09:00-18:00 (her StyleSeat hours).
+
 ## Booking (client)
 - `GET /api/services` → `{categories:[{cat, items:[{service_id,name,price,duration_min,deposit_cents|null,note}]}]}`
   (server-derived from services-data.js so client and server always agree)
 - `GET /api/availability?service_id=X&date=YYYY-MM-DD` →
   `{date, closed:bool, blocked:bool, slots:["09:00","09:30",...]}`
 - `POST /api/bookings` (auth) `{service_id, date, time, notes?}` →
-  `{booking, checkout_url}` — `checkout_url` null when deposit is null
-  (status `confirmed`-pending-Ebony, labeled `request`) else status
-  `awaiting_deposit` and checkout_url points to Stripe Checkout (demo:
-  `/demo-checkout?session=<id>`).
+  `{hold, checkout_url}` for a service with a deposit, or `{booking}` for a
+  request-only service.
+
+  **Deposit first: no money, no appointment.** A service with a published
+  deposit does NOT create a booking here. It creates a **hold**: the slot is
+  reserved for `HOLD_MINUTES` (15) while she completes checkout, and only
+  becomes a real booking when the deposit is paid. Nobody else can take the
+  slot during the hold. If she abandons checkout, the hold expires and the time
+  is immediately free again.
+
+  This replaces the old behaviour, where an unpaid booking sat on the calendar
+  for 24 hours. That let someone who never paid tie up a Saturday.
+
+  `hold` = `{id, expires_at, service_id, service_name, price, deposit_cents,
+  date, time, duration_min}`. Availability excludes both bookings and unexpired
+  holds. Expired holds are swept on every availability and booking read, so a
+  slot never stays locked by an abandoned checkout.
+
+  Request-only services (no published deposit) are unchanged: they create a
+  booking with status `request` for Ebony to confirm, because there is no
+  amount to charge up front.
+- `POST /api/holds/:id/refresh` (auth, owner) → `{hold}` — extends an unexpired
+  hold once while she is still on the checkout page. Refuses an expired hold
+  with 410 so the UI can send her back to pick a new time.
 - `POST /api/bookings/:id/cancel` (auth; owner or admin) → `{booking}` —
   sets `canceled`, records who, sends cancellation notification.
 - `POST /api/bookings/:id/pay-balance` (auth; owner or admin) →
@@ -126,11 +168,30 @@ balance, and are settled with Ebony in person. Only `mark-paid` with an explicit
 `amount_cents` can record what one of them actually cost.
 
 Payment effects:
-- deposit paid → status `confirmed`, `deposit_paid_at` set, deposit added to
-  `paid_cents`, confirmation notification (states the time is held and what is
-  still owed).
+- deposit paid → the hold becomes a booking with status `confirmed`,
+  `deposit_paid_at` set, deposit added to `paid_cents`, confirmation
+  notification to the client (states the time is held and what is still owed)
+  AND a new-booking notification to Ebony.
 - balance paid → added to `paid_cents`, `paid_in_full` true, paid-in-full
-  notification.
+  notification to the client and a payment notification to Ebony.
+
+## What Ebony is told (owner notifications)
+
+She should never have to open the dashboard to find out something happened.
+Every event that changes her day reaches her by email, and by SMS once a number
+is configured. Owner notifications go to `ADMIN_EMAILS[0]` and her phone.
+
+| Event | She is told |
+|---|---|
+| Deposit paid, new booking on the books | who, what, when, how much landed, what is still owed |
+| Booking request received (no published deposit) | who, what, when, and that it needs her yes |
+| Client cancels | who, what, when, and that the slot reopened |
+| Balance paid online | who, what, and that nothing is due in the chair |
+| Deposit never paid, appointment auto-cancelled | who, what, when, and that the slot reopened |
+| Payment landed on a dead booking | refund this one in Stripe |
+
+Owner messages name the client and their phone number so she can act straight
+from the notification. They are never sent to the client.
 
 ## Payments
 - `GET /api/checkout/:session_id` → `{booking, amount_cents, service_name}` (demo checkout page data)
@@ -161,8 +222,18 @@ Payment effects:
 - `POST /api/admin/blocked-days` `{date, reason?}` → `{days}` (idempotent)
 - `DELETE /api/admin/blocked-days/:date` → `{days}`
 - `GET /api/admin/clients` → `{clients:[{id,email,name,phone,bookings_count,last_booking}]}`
-- `POST /api/admin/broadcast` `{subject, message}` → `{sent:int}` — one message
-  to every client (email + sms template), logged in broadcasts.
+- `POST /api/admin/broadcast` `{subject, message, image?}` → `{sent:int, image_url?}`
+  — one message to every client (email + sms), logged in broadcasts.
+  - `image` is an optional flyer as a data URL (`data:image/jpeg;base64,...`).
+    Accepted types: jpeg, png, webp. Max 5 MB decoded. Anything else is a 400
+    with a plain message naming the limit.
+  - The server stores it and serves it at a stable URL. The email embeds the
+    flyer above the message and links it full size. SMS cannot carry an image,
+    so the text version appends the flyer link instead of dropping it.
+  - A flyer with no message is allowed (the image IS the message); a broadcast
+    with neither subject nor message nor image is a 400.
+- `GET /api/admin/broadcasts` (admin) → `{broadcasts:[{ts, subject, message,
+  image_url?, sent}]}` newest first, so she can see what she has already sent.
 
 ## Demo helpers (mock server only — NOT in production)
 - `GET /api/_outbox` → `{messages:[{ts,channel:"email"|"sms",to,subject,body}]}` newest first

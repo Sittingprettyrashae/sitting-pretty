@@ -95,7 +95,17 @@ function isPaidInFull(b: BookingLike): boolean {
 interface RenderedMessage {
   subject: string;
   emailBody: string;
+  // Only set when the message needs more than words (today: a broadcast
+  // flyer). The plain-text emailBody is always written too, both as the
+  // fallback part of the email and as what lands in notifications_log.
+  emailHtml?: string;
   smsBody: string;
+}
+
+// Anything she typed goes through this before it touches an HTML email.
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 }
 
 function tplBookingCreated(b: BookingLike, checkoutUrl: string): RenderedMessage {
@@ -278,20 +288,50 @@ function tplBookingCanceled(b: BookingLike, canceledBy: "client" | "admin"): Ren
   };
 }
 
-function tplBroadcast(name: string | null, subject: string, message: string): RenderedMessage {
+// One message to everybody, with an optional flyer she attached in the
+// dashboard. The flyer sits above her words and links to the full-size
+// picture. SMS cannot carry an image, so the text gets the link instead of
+// losing the flyer entirely.
+function tplBroadcast(
+  name: string | null,
+  subject: string,
+  message: string,
+  imageUrl: string | null,
+): RenderedMessage {
   const first = name?.trim().split(/\s+/)[0] || "there";
+
+  const text = [`Hi ${first},`, ``];
+  if (imageUrl) text.push(`See the flyer: ${imageUrl}`, ``);
+  if (message) text.push(message, ``);
+  text.push(PHONE_LINE, ``, SITE_NAME);
+
+  let emailHtml: string | undefined;
+  if (imageUrl) {
+    const href = escapeHtml(imageUrl);
+    const parts = [
+      `<p>Hi ${escapeHtml(first)},</p>`,
+      `<p><a href="${href}"><img src="${href}" alt="Flyer from ${SITE_NAME}" width="560" ` +
+      `style="display:block;width:100%;max-width:560px;height:auto;border:0;border-radius:12px"></a></p>`,
+      `<p style="font-size:14px"><a href="${href}">Tap the picture to see it full size.</a></p>`,
+    ];
+    if (message) parts.push(`<p>${escapeHtml(message).replace(/\n/g, "<br>")}</p>`);
+    parts.push(`<p>${PHONE_LINE}</p>`, `<p>${SITE_NAME}</p>`);
+    emailHtml =
+      `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;` +
+      `font-size:16px;line-height:1.5;max-width:560px">${parts.join("")}</div>`;
+  }
+
+  const smsBody = imageUrl
+    ? (message ? `${SITE_NAME}: ${message} ${imageUrl}` : `${SITE_NAME}: ${imageUrl}`)
+    : `${SITE_NAME}: ${message}`;
+
   return {
-    subject,
-    emailBody: [
-      `Hi ${first},`,
-      ``,
-      message,
-      ``,
-      PHONE_LINE,
-      ``,
-      SITE_NAME,
-    ].join("\n"),
-    smsBody: `${SITE_NAME}: ${message}`,
+    // Her subject line is optional when a flyer carries the message, but an
+    // email still has to say something in the inbox list.
+    subject: subject || `A note from ${SITE_NAME}`,
+    emailBody: text.join("\n"),
+    emailHtml,
+    smsBody,
   };
 }
 
@@ -309,6 +349,7 @@ async function sendEmail(
   to: string | null,
   subject: string,
   body: string,
+  html?: string,
 ): Promise<DeliveryResult> {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key || !to) return { status: "logged" };
@@ -317,7 +358,9 @@ async function sendEmail(
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject, text: body }),
+      // text always goes along, so a mail app that refuses HTML still shows
+      // the message and the flyer link.
+      body: JSON.stringify({ from, to: [to], subject, text: body, ...(html ? { html } : {}) }),
     });
     if (!res.ok) return { status: "failed", error: `Resend ${res.status}: ${await res.text()}` };
     const data = await res.json();
@@ -360,7 +403,7 @@ interface Recipient {
 
 async function deliver(event: string, to: Recipient, msg: RenderedMessage): Promise<void> {
   const db = adminDb();
-  const emailResult = await sendEmail(to.email, msg.subject, msg.emailBody);
+  const emailResult = await sendEmail(to.email, msg.subject, msg.emailBody, msg.emailHtml);
   const smsResult = await sendSms(to.phone, msg.smsBody);
   const rows = [
     {
@@ -460,10 +503,11 @@ export async function notifyBroadcast(
   client: { id: string; email: string; name: string | null; phone: string | null },
   subject: string,
   message: string,
+  imageUrl: string | null = null,
 ): Promise<void> {
   await deliver(
     "broadcast",
     { email: client.email, phone: client.phone, client_id: client.id, booking_id: null },
-    tplBroadcast(client.name, subject, message),
+    tplBroadcast(client.name, subject, message, imageUrl),
   );
 }

@@ -13,7 +13,7 @@ export class HttpError extends Error {
 export const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_ORIGIN") ?? "*",
   "Access-Control-Allow-Headers": "authorization, content-type, stripe-signature",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 
 export function json(data: unknown, status = 200): Response {

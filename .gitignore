@@ -3,3 +3,4 @@
 .DS_Store
 server/db.json
 server/db.json.tmp
+uploads/

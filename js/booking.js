@@ -49,6 +49,78 @@
   let offline = false;
   let me = null;           // {client, bookings} when logged in
 
+  // ---------- her hours ----------
+  // Hours are DATA, not code. Ebony sets them in her dashboard and one record
+  // feeds all three places they show up: the table on this page, which days
+  // the booking sheet offers, and the server's availability. Nothing here
+  // decides that a particular day is closed.
+  //
+  // index.html ships that record's default as plain markup, so the page reads
+  // correctly with no JavaScript, when the API is unreachable, and in the
+  // moment before this request lands. Once real hours arrive they replace it.
+  const OPEN_DAYS_COPY = [
+    "Text Ebony for times.",
+    "One day a week.",
+    "Two days a week.",
+    "Three days a week.",
+    "Four days a week.",
+    "Five days a week.",
+    "Six days a week.",
+    "Seven days a week.",
+  ];
+
+  let hoursDays = null;    // [{closed, open, close}] indexed by weekday, null until loaded
+  let hoursLoad = null;
+
+  function normalizeHours(data) {
+    const raw = data && Array.isArray(data.days) ? data.days : null;
+    if (!raw) return null;
+    const byDay = [];
+    raw.forEach(d => {
+      if (!d) return;
+      const w = Number(d.weekday);
+      if (!Number.isInteger(w) || w < 0 || w > 6 || byDay[w]) return;
+      const closed = !!d.closed || !d.open || !d.close;
+      byDay[w] = { closed, open: closed ? null : String(d.open), close: closed ? null : String(d.close) };
+    });
+    // Only a complete week is trusted. Half a record could print "Closed" on
+    // a day she is working, and turning her clients away is the one mistake
+    // this page must never make.
+    for (let w = 0; w < 7; w++) if (!byDay[w]) return null;
+    return byDay;
+  }
+
+  function loadHours() {
+    if (!hoursLoad) {
+      hoursLoad = SP.request("/api/hours")
+        .then(data => { hoursDays = normalizeHours(data); paintHours(); return hoursDays; })
+        // Leave the static hours exactly as they are, and let the next caller
+        // try again rather than caching the failure forever.
+        .catch(() => { hoursLoad = null; return null; });
+    }
+    return hoursLoad;
+  }
+
+  const hoursRange = (h) => h.closed ? "Closed" : `${fmtTime(h.open)} to ${fmtTime(h.close)}`;
+
+  // Rewrite the seven rows in place: same nodes, same count, so there is no
+  // layout shift and the scroll reveal keeps the element it was given.
+  function paintHours() {
+    if (!hoursDays) return;
+    const table = document.getElementById("hoursTable");
+    if (table) {
+      table.querySelectorAll(".hrow").forEach(row => {
+        const h = hoursDays[Number(row.getAttribute("data-weekday"))];
+        if (!h) return;
+        row.classList.toggle("closed", h.closed);
+        const t = row.querySelector(".t");
+        if (t) t.textContent = hoursRange(h);
+      });
+    }
+    const headline = document.getElementById("hoursHeadline");
+    if (headline) headline.textContent = OPEN_DAYS_COPY[hoursDays.filter(h => !h.closed).length];
+  }
+
   // ---------- catalog ----------
   function localCatalog() {
     if (typeof SERVICES === "undefined") return [];
@@ -319,13 +391,14 @@
     for (let i = 0; i < 14; i++) {
       const d = new Date(base + i * 86400000);
       const iso = d.toISOString().slice(0, 10);
-      const sunday = d.getUTCDay() === 0;
       const chip = el(`
-        <button type="button" class="date-chip" data-date="${iso}" ${sunday ? "disabled" : ""}>
-          <span class="dw">${sunday ? "Closed" : d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}</span>
+        <button type="button" class="date-chip" data-date="${iso}" data-weekday="${d.getUTCDay()}"
+                data-dw="${d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}">
+          <span class="dw"></span>
           <span class="dn">${d.getUTCDate()}</span>
           <span class="mo">${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}</span>
         </button>`);
+      paintDayChip(chip);
       strip.appendChild(chip);
     }
     body.appendChild(strip);
@@ -361,7 +434,33 @@
       c.classList.add("sel"); S.time = c.getAttribute("data-t"); cont.disabled = false;
     });
     cont.addEventListener("click", () => { if (S.date && S.time) next(); });
-    if (S.date) { const pre = strip.querySelector(`[data-date="${S.date}"]`); if (pre) { pre.classList.add("sel"); loadDay(S.date); } }
+    if (S.date) { const pre = strip.querySelector(`[data-date="${S.date}"]`); if (pre && !pre.disabled) { pre.classList.add("sel"); loadDay(S.date); } }
+
+    // Hours normally land at boot, long before anyone opens this sheet. If
+    // that request failed, every day stays tappable and the server answers
+    // for each one, rather than this file guessing which days she is closed.
+    if (!hoursDays) {
+      const seq = opSeq;
+      loadHours().then(() => {
+        if (stale(seq) || !hoursDays) return;
+        strip.querySelectorAll(".date-chip").forEach(paintDayChip);
+        const sel = strip.querySelector(".date-chip.sel");
+        if (sel && sel.disabled) {
+          sel.classList.remove("sel");
+          S.date = null; S.time = null;
+          cont.disabled = true; times.innerHTML = "";
+        }
+      });
+    }
+  }
+
+  // Which days the strip offers comes from her hours record. A day she closes
+  // stops being offered the moment she saves it, and no weekday is special.
+  function paintDayChip(chip) {
+    const h = hoursDays ? hoursDays[Number(chip.getAttribute("data-weekday"))] : null;
+    const closed = !!(h && h.closed);
+    chip.disabled = closed;
+    chip.querySelector(".dw").textContent = closed ? "Closed" : chip.getAttribute("data-dw");
   }
 
   // ----- step: who (account) -----
@@ -712,7 +811,7 @@
       </div>`));
     body.appendChild(el(`<div class="field" style="margin-top:1rem"><label for="bkNotes">Anything Ebony should know? (optional)</label><textarea id="bkNotes" rows="2" placeholder="Hair length, inspo, questions...">${esc(S.notes)}</textarea></div>`));
     body.appendChild(el(dep != null
-      ? `<div class="deposit-line"><b>Deposit due now: ${money(dep)}.</b> Paid securely online; it comes off your balance on the day. The rest is due at your appointment.</div>`
+      ? `<div class="deposit-line"><b>Deposit due now: ${money(dep)}.</b> This is what books your spot, so the time is yours once it clears. It comes off your balance, and the rest is due at your appointment. We will hold this time for 15 minutes while you pay.</div>`
       : `<div class="deposit-line"><b>A deposit still secures this appointment.</b> Ebony will text you to confirm your deposit amount before your time is locked in.</div>`));
     const book = el(`<button type="button" class="btn btn-solid">${dep != null ? "Pay deposit & book" : "Send booking request"}</button>`);
     foot.appendChild(book);
@@ -971,6 +1070,9 @@
 
   // ---------- boot ----------
   async function boot() {
+    // Her hours first and unawaited: the table on the page and the day strip
+    // both want them, and nothing else has to wait for them to arrive.
+    loadHours();
     await loadCatalog();
     buildAccordion();
     wireNav();

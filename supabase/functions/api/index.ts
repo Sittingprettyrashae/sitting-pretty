@@ -2,8 +2,9 @@
 // named "api" so the /api/* paths in API.md map 1:1 onto
 // https://<project-ref>.supabase.co/functions/v1/api/*.
 //
-// Deploy with --no-verify-jwt (RUNBOOK step 3): /services and /availability
-// are public, and Stripe calls /stripe/webhook without a Supabase JWT.
+// Deploy with --no-verify-jwt (RUNBOOK step 3): /services, /hours, and
+// /availability are public, and Stripe calls /stripe/webhook without a
+// Supabase JWT.
 // Everything that needs auth enforces it in code via _shared/auth.ts.
 //
 // Auth: password, Google, and the email code are all native Supabase Auth
@@ -22,6 +23,7 @@ import { handleAuth } from "./auth.ts";
 import {
   handleAvailability,
   handleCreateBooking,
+  handleHours,
   handlePayBalance,
   handleServices,
 } from "./bookings.ts";
@@ -42,6 +44,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     if (req.method === "GET" && path === "/services") return handleServices();
+    if (req.method === "GET" && path === "/hours") return await handleHours();
     if (req.method === "GET" && path === "/availability") return await handleAvailability(url);
     if (path === "/me") return await handleMe(req);
     if (req.method === "POST" && path === "/bookings") return await handleCreateBooking(req);

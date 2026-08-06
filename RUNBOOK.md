@@ -7,13 +7,14 @@ static frontend on GitHub Pages.
 
 Production code lives in `supabase/`:
 
-- `supabase/schema.sql` - tables, trigger, RLS, indexes, and the
-  `bookings_overlap` exclusion constraint (database-level double-booking
-  guard)
+- `supabase/schema.sql` - tables, trigger, RLS, indexes, the `bookings_overlap`
+  exclusion constraint (database-level double-booking guard), her editable
+  `hours` record, and the `flyers` Storage bucket
 - `supabase/functions/api/` - the whole `/api/*` contract as one function
   (`index.ts` router, `auth.ts`, `bookings.ts`, `me.ts`, `cancel.ts`,
   `admin.ts`, `stripe-webhook.ts`)
-- `supabase/functions/_shared/` - auth, db, catalog, notify, stripe helpers
+- `supabase/functions/_shared/` - auth, db, catalog, hours, flyer, notify,
+  stripe helpers
 
 Clients get three ways in: a password they pick, Sign in with Google, or the
 6-digit email code. Setting up the first two is step 2b.
@@ -433,6 +434,78 @@ Notes:
 Redeploy after any code change with the same deploy command. Logs:
 `supabase functions logs api` or the dashboard's Edge Functions > api > Logs.
 
+## 3b) Her hours and her flyers (things she changes herself)
+
+Two things in this system belong to Ke'Ebonie, not to whoever is maintaining
+the code. Both are set from her dashboard on her phone.
+
+### Her hours are data, never code
+
+Her working week lives in the `public.hours` table, one row per weekday, and
+that single record feeds all three places hours show up:
+
+- the hours table on the public site (`index.html` reads `GET /api/hours`)
+- which days the booking sheet offers (`js/booking.js`)
+- what times the server will actually accept (`supabase/functions/api/bookings.ts`)
+
+So the site can never advertise a day she has closed.
+
+**If she wants different hours, she opens her dashboard and saves them.
+Nobody edits a file.** There is no weekday written into the code anywhere; the
+values in `schema.sql` and in the static markup of `index.html` are only the
+DEFAULT she started with (Sunday closed, Monday to Friday 09:00-20:00,
+Saturday 09:00-18:00, from her StyleSeat), used to seed a brand new database
+and to keep the page readable before the real hours load.
+
+Two things worth telling her once:
+
+- Changing her hours never moves an appointment that is already booked. Those
+  times were promised to a client. If she narrows a day, the save hands back
+  the upcoming appointments that now sit outside her hours so she can decide
+  herself which to move and which to keep.
+- Times save on the hour or the half hour, because appointments start every
+  30 minutes.
+
+To read the current record without the dashboard:
+
+```sql
+select * from public.hours order by weekday;
+```
+
+### Flyer images: where they live and what they cost
+
+When she attaches a flyer to a broadcast, the picture is uploaded once to
+Supabase Storage and the email points at it. It is not attached to each
+message. One upload, one link, every client sees the same flyer.
+
+- Bucket: `flyers`, created by `supabase/schema.sql`. Public on purpose, so
+  the picture loads inside an email months later. A signed URL would expire
+  and leave a broken image in a message she already sent.
+- Path: `YYYY-MM-DD/<random-uuid>.<jpg|png|webp>`, so nothing she typed ever
+  becomes a guessable filename.
+- Public URL:
+  `https://YOUR-PROJECT-REF.supabase.co/storage/v1/object/public/flyers/...`
+- Only she can put a file there. The upload runs inside the edge function
+  with the service role key after the admin check; there is no browser upload
+  path and no policy granting one.
+- Limits, enforced in `_shared/flyer.ts`: JPG, PNG, or WEBP, 5 MB max. A
+  bigger or wrong-type file gets one plain message and nothing is sent to
+  anybody.
+- Browse or delete them in the dashboard: Storage > flyers.
+
+Cost, on Supabase's Free plan: 1 GB of file storage and 5 GB of egress a
+month, per https://supabase.com/pricing (check the page, plans change).
+
+What that means in her terms. Flyers off a phone are usually well under 1 MB,
+so 1 GB holds roughly a thousand of them. Egress is counted each time a
+client's mail app loads the picture: a 1 MB flyer sent to 60 clients who all
+open it is about 60 MB, so she could send a flyer a week for a year and still
+be nowhere near 5 GB. Nothing here needs a paid plan for a one-chair salon.
+
+If storage ever does fill up, delete old flyers in Storage > flyers, or move
+to Pro. Do not delete a flyer from a message she sent recently: the picture
+in that email would go blank.
+
 ## 4) Stripe webhook endpoint
 
 In HER Stripe dashboard (test mode first):
@@ -662,6 +735,19 @@ account.
       temporarily schedule the job with a shorter interval, then restore.
 - [ ] Sunday shows closed. On a Saturday, the last offered start time equals
       18:00 minus the service duration.
+- [ ] Hours (step 3b): from the dashboard, close a day she normally works and
+      save. That day disappears from the booking sheet AND from the hours
+      table on the public site, and an appointment already booked on it is
+      still there, listed back to her as affected. Put the day back and both
+      return to normal.
+- [ ] Hours with JavaScript turned off: the public hours table still reads
+      correctly (it falls back to the static markup in `index.html`).
+- [ ] Broadcast with a flyer: attach a picture, send, and the email shows the
+      flyer above the message with a working full-size link. The file appears
+      under Storage > flyers and the row in `public.broadcasts` has its
+      `image_url`.
+- [ ] Flyer limits: a file over 5 MB and a non-image file are both refused
+      with one plain message, and NOBODY receives a message.
 - [ ] Cancel from My bookings: status `canceled`, cancellation email arrives.
 - [ ] Admin: sign in with the admin email, dashboard lists all bookings.
 - [ ] Admin blocks a day: it vanishes from the date picker; unblock restores

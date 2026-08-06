@@ -13,8 +13,12 @@ import { renderNotification } from './templates.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const DB_PATH = path.join(__dirname, 'db.json');
+// DB_PATH lets a second copy of the server run beside the demo one (different
+// PORT, different file) without the two overwriting each other's data.
+const DB_PATH = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(__dirname, 'db.json');
 const PORT = Number(process.env.PORT || 4870);
+// Her studio line. Owner alerts text here once an SMS number is configured.
+const OWNER_PHONE = process.env.OWNER_PHONE || '(817) 704-8300';
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'ebony@demo.local')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
@@ -29,6 +33,11 @@ const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_MAX_REQUESTS = 5;
 const DEPOSIT_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+// How long a slot stays reserved while a client completes checkout. Her
+// deposit is what books the spot, so nothing is on the calendar until it
+// clears, and an abandoned checkout frees the time in minutes.
+const HOLD_MINUTES = Number(process.env.HOLD_MINUTES || 15);
+const HOLD_MS = Math.max(1, HOLD_MINUTES) * 60 * 1000;
 
 // Sessions: 90 days, sliding. Every authenticated request pushes the expiry
 // back out so repeat clients stay signed in. The new expiry is only written to
@@ -158,11 +167,140 @@ function toHHMM(mins) {
   return String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0');
 }
 
-// Hours: Sun closed, Mon-Fri 09:00-20:00, Sat 09:00-18:00.
+// Strict "HH:MM" 24h clock parser. Returns minutes past midnight, or NaN.
+function parseClock(v) {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(typeof v === 'string' ? v.trim() : '');
+  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+}
+
+/* ---------------- hours (her schedule, stored as data) ---------------------- */
+
+// Her hours are a record in the database, not a rule in the code. Availability,
+// the dashboard, and the public hours table all read this one record, so the
+// site can never advertise hours she does not actually work.
+// The seed is her real StyleSeat schedule; she can change any of it.
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function defaultHours() {
+  return [0, 1, 2, 3, 4, 5, 6].map((weekday) => {
+    if (weekday === 0) return { weekday, closed: true, open: null, close: null };
+    return { weekday, closed: false, open: '09:00', close: weekday === 6 ? '18:00' : '20:00' };
+  });
+}
+
+// A day is only usable if it is open, both times parse, and close is after open.
+function usableDay(day) {
+  if (!day || typeof day !== 'object') return false;
+  if (day.closed === true) return true;
+  const o = parseClock(day.open);
+  const c = parseClock(day.close);
+  return Number.isFinite(o) && Number.isFinite(c) && o < c;
+}
+
+// Any db.json that is missing hours, or whose hours are damaged, falls back to
+// her real schedule rather than leaving the shop with no hours at all.
+function normalizeHours(value) {
+  if (!Array.isArray(value) || value.length !== 7) return defaultHours();
+  const out = [];
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const found = value.find((d) => d && Number(d.weekday) === weekday);
+    if (!usableDay(found)) return defaultHours();
+    out.push(found.closed === true
+      ? { weekday, closed: true, open: null, close: null }
+      : { weekday, closed: false, open: found.open, close: found.close });
+  }
+  return out;
+}
+
+function hoursRecord() {
+  if (!Array.isArray(db.hours) || db.hours.length !== 7) db.hours = defaultHours();
+  return db.hours;
+}
+
+// API shape: all 7 days in weekday order, times null on a closed day.
+function publicHours() {
+  return hoursRecord().map((d) => ({
+    weekday: d.weekday,
+    closed: !!d.closed,
+    open: d.closed ? null : d.open,
+    close: d.closed ? null : d.close
+  }));
+}
+
 function businessHours(dateStr) {
-  const wd = weekdayOf(dateStr);
-  if (wd === 0) return null;
-  return { open: 9 * 60, close: (wd === 6 ? 18 : 20) * 60 };
+  const day = hoursRecord().find((d) => d.weekday === weekdayOf(dateStr));
+  if (!day || day.closed) return null;
+  const open = parseClock(day.open);
+  const close = parseClock(day.close);
+  if (!Number.isFinite(open) || !Number.isFinite(close) || open >= close) return null;
+  return { open, close };
+}
+
+// Validation for PUT /api/admin/hours. Every message is written for her, not
+// for a developer: it names the day and says what to fix.
+function parseHoursPayload(days) {
+  if (!Array.isArray(days) || !days.length) {
+    throw new ApiError(400, 'Please send all seven days, Sunday through Saturday.');
+  }
+  const seen = new Map();
+  for (const raw of days) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new ApiError(400, 'Each day needs a weekday number and whether you are open.');
+    }
+    const weekday = raw.weekday;
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+      throw new ApiError(400, 'Each day needs a weekday from 0 for Sunday to 6 for Saturday.');
+    }
+    if (seen.has(weekday)) {
+      throw new ApiError(400, DAY_NAMES[weekday] + ' is listed twice. Please send each day once.');
+    }
+    if (raw.closed === true) {
+      seen.set(weekday, { weekday, closed: true, open: null, close: null });
+      continue;
+    }
+    const open = parseClock(raw.open);
+    const close = parseClock(raw.close);
+    if (!Number.isFinite(open)) {
+      throw new ApiError(400, 'The opening time for ' + DAY_NAMES[weekday] + ' needs to look like 09:00.');
+    }
+    if (!Number.isFinite(close)) {
+      throw new ApiError(400, 'The closing time for ' + DAY_NAMES[weekday] + ' needs to look like 18:00.');
+    }
+    if (open % 30 !== 0 || close % 30 !== 0) {
+      throw new ApiError(400, 'Times need to land on the hour or the half hour, like 09:00 or 09:30. Please check ' + DAY_NAMES[weekday] + '.');
+    }
+    if (open >= close) {
+      throw new ApiError(400, 'On ' + DAY_NAMES[weekday] + ' the closing time needs to be later than the opening time.');
+    }
+    seen.set(weekday, { weekday, closed: false, open: toHHMM(open), close: toHHMM(close) });
+  }
+  const missing = [];
+  for (let weekday = 0; weekday < 7; weekday += 1) if (!seen.has(weekday)) missing.push(DAY_NAMES[weekday]);
+  if (missing.length) {
+    throw new ApiError(400, 'Please include every day. Missing: ' + missing.join(', ') + '.');
+  }
+  return [0, 1, 2, 3, 4, 5, 6].map((weekday) => seen.get(weekday));
+}
+
+// Appointments already on the books are promises. Changing hours never cancels,
+// moves, or hides one; this list is only so the dashboard can show her which
+// ones now sit outside her hours, and she decides what to do about them.
+function bookingsOutsideHours(days) {
+  const today = chicagoNow().date;
+  const byWeekday = new Map(days.map((d) => [d.weekday, d]));
+  return db.bookings
+    .filter((b) => {
+      if (b.status === 'canceled') return false;
+      if (!b.date || b.date < today) return false;
+      const day = byWeekday.get(weekdayOf(b.date));
+      if (!day || day.closed) return true;
+      const start = parseClock(b.time);
+      if (!Number.isFinite(start)) return false;
+      const end = start + (b.duration_min || 30);
+      return start < parseClock(day.open) || end > parseClock(day.close);
+    })
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+    .map(withMoney);
 }
 
 /* ---------------- persistence ---------------------------------------------- */
@@ -173,8 +311,8 @@ let saveTimer = null;
 function defaultDb() {
   return {
     clients: [], bookings: [], sessions: {}, codes: {}, oauth_states: {},
-    checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [],
-    seq: {}
+    checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [], holds: [],
+    hours: defaultHours(), seq: {}
   };
 }
 
@@ -183,6 +321,17 @@ function defaultDb() {
 function normalizeDb() {
   if (!db.oauth_states) db.oauth_states = {};
   if (!db.sessions) db.sessions = {};
+  if (!Array.isArray(db.broadcasts)) db.broadcasts = [];
+  // Written before slots were held during checkout. Missing this made every
+  // availability read throw, which would have taken the booking page down for
+  // an existing database rather than a fresh one.
+  if (!Array.isArray(db.holds)) db.holds = [];
+  if (!Array.isArray(db.blocked_days)) db.blocked_days = [];
+  if (!Array.isArray(db.outbox)) db.outbox = [];
+  if (!db.checkout_sessions) db.checkout_sessions = {};
+  if (!db.codes) db.codes = {};
+  // A db.json written before hours were editable simply gets her real hours.
+  db.hours = normalizeHours(db.hours);
   for (const c of db.clients) {
     if (c.password_hash === undefined) c.password_hash = null;
     if (!c.auth_provider) c.auth_provider = 'code';
@@ -297,8 +446,13 @@ function seedDemo() {
 
 /* ---------------- outbox and notifications ---------------------------------- */
 
-function pushOutbox(channel, to, subject, body) {
-  db.outbox.unshift({ ts: new Date().toISOString(), channel, to, subject: subject || null, body });
+function pushOutbox(channel, to, subject, body, html) {
+  db.outbox.unshift({
+    ts: new Date().toISOString(), channel, to, subject: subject || null, body,
+    // Only the flyer email carries an html version, so the picture can sit
+    // above the message in a real inbox. Text always says the same thing.
+    ...(html ? { html } : {})
+  });
   if (db.outbox.length > OUTBOX_CAP) db.outbox.length = OUTBOX_CAP;
   save();
 }
@@ -306,7 +460,7 @@ function pushOutbox(channel, to, subject, body) {
 function notify(event, target, data) {
   // target: { email?, phone?, name? }
   const t = renderNotification(event, { ...data, name: target.name });
-  if (t.email && target.email) pushOutbox('email', target.email, t.email.subject, t.email.body);
+  if (t.email && target.email) pushOutbox('email', target.email, t.email.subject, t.email.body, t.email.html);
   if (t.sms && target.phone) pushOutbox('sms', target.phone, null, t.sms.body);
 }
 
@@ -685,11 +839,16 @@ function availability(svc, dateStr) {
 
   const dur = svc.duration_min || 30;
   const lastStart = hours.close - dur;
-  const dayBookings = db.bookings.filter((b) => b.date === dateStr && b.status !== 'canceled');
+  // A slot is taken by a real booking OR by someone who is paying for it right
+  // now. Without counting live holds, two people could pay for the same time.
+  sweepExpiredHolds();
+  const taken = db.bookings
+    .filter((b) => b.date === dateStr && b.status !== 'canceled')
+    .concat(db.holds.filter((h) => h.date === dateStr));
 
   for (let t = hours.open; t <= lastStart; t += 30) {
     if (dateStr === now.date && t <= now.minutes) continue; // never offer past times today
-    const clash = dayBookings.some((b) => {
+    const clash = taken.some((b) => {
       const bs = toMin(b.time);
       const bd = b.duration_min || 30;
       return t < bs + bd && t + dur > bs; // one client at a time
@@ -699,11 +858,63 @@ function availability(svc, dateStr) {
   return out;
 }
 
+// Everything Ebony needs to know, sent to her rather than waiting for her to
+// open the dashboard. Her phone number is the studio line, so SMS goes there
+// once a number is configured; email always works.
+function notifyOwner(event, data) {
+  notify(event, { email: ADMIN_EMAILS[0], phone: OWNER_PHONE, name: 'Ke’Ebonie' }, data);
+}
+
+// The deposit landed, so this time is really hers now: the hold becomes an
+// appointment. Returns the booking, or null if the hold vanished underneath us.
+function bookingFromPaidHold(hold, sessionId) {
+  const i = db.holds.indexOf(hold);
+  if (i >= 0) db.holds.splice(i, 1);
+  const client = db.clients.find((c) => c.id === hold.client_id);
+  const booking = {
+    id: nextId('bk'),
+    client_id: hold.client_id,
+    client_name: client ? client.name : null,
+    client_email: client ? client.email : null,
+    client_phone: client ? client.phone : null,
+    service_id: hold.service_id, service_name: hold.service_name,
+    price: hold.price, deposit_cents: hold.deposit_cents,
+    date: hold.date, time: hold.time, duration_min: hold.duration_min,
+    status: 'confirmed',
+    notes: hold.notes || '',
+    checkout_session_id: sessionId,
+    deposit_paid_at: new Date().toISOString(),
+    paid_cents: hold.deposit_cents,
+    created_at: hold.created_at || new Date().toISOString()
+  };
+  if (totalCentsFor(booking) != null && booking.paid_cents >= totalCentsFor(booking)) {
+    booking.paid_in_full = true;
+  }
+  db.bookings.push(booking);
+  notify('booking_confirmed',
+    { email: booking.client_email, phone: booking.client_phone, name: booking.client_name },
+    { booking, balance_cents: balanceCentsFor(booking) });
+  notifyOwner('owner_new_booking', { booking, balance_cents: balanceCentsFor(booking) });
+  save();
+  return booking;
+}
+
+// An abandoned checkout must not keep a Saturday locked. Runs before every
+// availability and booking read, so a dropped hold frees the time within
+// minutes rather than waiting on a timer.
+function sweepExpiredHolds() {
+  if (!db || !db.holds || !db.holds.length) return;
+  const now = Date.now();
+  const before = db.holds.length;
+  db.holds = db.holds.filter((h) => Date.parse(h.expires_at) > now);
+  if (db.holds.length !== before) save();
+}
+
 /* ---------------- payments --------------------------------------------------- */
 
 // kind: 'deposit' locks the appointment in; 'balance' is the rest of the price,
 // paid online later by a client who would rather not settle up in the chair.
-async function createCheckout(booking, origin, kind = 'deposit', amountCents = null) {
+async function createCheckout(booking, origin, kind = 'deposit', amountCents = null, opts = {}) {
   const amount = amountCents == null ? booking.deposit_cents : amountCents;
   const label = kind === 'balance'
     ? 'Balance: ' + booking.service_name
@@ -736,7 +947,7 @@ async function createCheckout(booking, origin, kind = 'deposit', amountCents = n
       throw new ApiError(502, 'Stripe error: ' + (json.error && json.error.message || res.status));
     }
     db.checkout_sessions[json.id] = {
-      id: json.id, booking_id: booking.id, amount_cents: amount, kind,
+      id: json.id, booking_id: opts.hold ? null : booking.id, hold_id: opts.hold ? booking.id : null, amount_cents: amount, kind,
       paid: false, stripe: true, url: json.url, pay_token: payToken,
       created_at: new Date().toISOString()
     };
@@ -745,7 +956,7 @@ async function createCheckout(booking, origin, kind = 'deposit', amountCents = n
   const sid = 'demo_' + crypto.randomBytes(8).toString('hex');
   const url = '/demo-checkout?session=' + sid + '&pay_token=' + payToken;
   db.checkout_sessions[sid] = {
-    id: sid, booking_id: booking.id, amount_cents: amount, kind,
+    id: sid, booking_id: opts.hold ? null : booking.id, hold_id: opts.hold ? booking.id : null, amount_cents: amount, kind,
     paid: false, stripe: false, url, pay_token: payToken,
     created_at: new Date().toISOString()
   };
@@ -838,6 +1049,7 @@ function markBalancePaid(booking, amountCents) {
   notify('balance_paid',
     { email: booking.client_email, phone: booking.client_phone, name: booking.client_name },
     { booking });
+  notifyOwner('owner_balance_paid', { booking, amount_cents: amountCents });
   save();
 }
 
@@ -859,6 +1071,7 @@ function sweepExpiredDeposits() {
     notify('booking_canceled_deposit_unpaid',
       { email: b.client_email, phone: b.client_phone, name: b.client_name },
       { booking: b });
+    notifyOwner('owner_deposit_expired', { booking: b });
     changed = true;
   }
   if (changed) save();
@@ -879,18 +1092,110 @@ function sweepExpiredSessions() {
   if (changed || states !== Object.keys(db.oauth_states || {}).length) save();
 }
 
+/* ---------------- flyers (broadcast images) ---------------------------------- */
+
+// Flyers land in uploads/ at the project root: gitignored, never part of the
+// site's source. Files are written with a name the server invents and an
+// extension that matches what the bytes actually are, so nothing a caller sends
+// can decide where the file goes or how it is later served.
+const UPLOADS_DIRNAME = 'uploads';
+const UPLOADS_DIR = path.join(ROOT, UPLOADS_DIRNAME);
+const FLYER_MAX_BYTES = 5 * 1024 * 1024;
+const FLYER_TYPES = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+// 5 MB of image is about 6.7 MB once it is base64 in a data URL, plus the rest
+// of the JSON. 8 MB leaves room for that and nothing more.
+const BROADCAST_BODY_MAX = 8 * 1024 * 1024;
+
+// Rounds up, so a flyer that is barely over the limit never reads as if it were
+// exactly at it.
+function humanSize(bytes) {
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return (Math.ceil(mb * 10) / 10) + ' MB';
+  return Math.max(1, Math.ceil(bytes / 1024)) + ' KB';
+}
+
+// What the bytes really are, regardless of what the data URL claimed.
+function sniffImageType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 &&
+      buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) return 'image/png';
+  if (buf.length >= 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+      buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+
+const FLYER_WRONG_TYPE = 'Flyers can be a JPG, PNG, or WEBP image. Please save it as one of those and try again.';
+
+// Takes a data URL, returns the stable path the flyer is served at.
+function saveFlyer(dataUrl) {
+  const m = /^data:([a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)?;base64,([\s\S]*)$/i
+    .exec(String(dataUrl || '').trim());
+  if (!m) {
+    throw new ApiError(400, 'That flyer did not come through. Please pick the image again and resend.');
+  }
+  const type = String(m[1] || '').toLowerCase();
+  const ext = FLYER_TYPES[type];
+  if (!ext) throw new ApiError(400, FLYER_WRONG_TYPE);
+  const b64 = m[2].replace(/\s+/g, '');
+  if (!b64 || b64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+    throw new ApiError(400, 'That flyer did not come through in one piece. Please pick the image again and resend.');
+  }
+  // Reject on the encoded length first so an oversized flyer is never decoded.
+  const approx = Math.floor((b64.length * 3) / 4);
+  if (approx > FLYER_MAX_BYTES) {
+    throw new ApiError(400, 'That flyer is about ' + humanSize(approx) +
+      '. Flyers need to be 5 MB or smaller. Please save it a little smaller and send it again.');
+  }
+  const buf = Buffer.from(b64, 'base64');
+  if (!buf.length) {
+    throw new ApiError(400, 'That flyer came through empty. Please pick the image again and resend.');
+  }
+  if (buf.length > FLYER_MAX_BYTES) {
+    throw new ApiError(400, 'That flyer is ' + humanSize(buf.length) +
+      '. Flyers need to be 5 MB or smaller. Please save it a little smaller and send it again.');
+  }
+  if (sniffImageType(buf) !== type) throw new ApiError(400, FLYER_WRONG_TYPE);
+  try {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    const name = 'flyer-' + Date.now().toString(36) + '-' + crypto.randomBytes(6).toString('hex') + ext;
+    fs.writeFileSync(path.join(UPLOADS_DIR, name), buf);
+    return '/' + UPLOADS_DIRNAME + '/' + name;
+  } catch (e) {
+    console.error('[flyer] save failed:', e.message);
+    throw new ApiError(500, 'The flyer could not be saved. Please try sending it again.');
+  }
+}
+
 /* ---------------- API router -------------------------------------------------- */
 
-async function readBody(req) {
+// Bodies stay capped. The default is 1 MB, as before; only the broadcast route
+// asks for a bigger cap, and only because a flyer travels inside it.
+const BODY_MAX_DEFAULT = 1e6;
+
+async function readBody(req, opts) {
+  const max = (opts && opts.max) || BODY_MAX_DEFAULT;
+  const tooLarge = (opts && opts.tooLarge) || 'Body too large';
+  // Past the limit we stop keeping the body, but we keep reading for a little
+  // while so the "too big" answer actually reaches whoever sent it instead of a
+  // hung-up socket. Anything absurd gets the socket closed on it.
+  const hardMax = max * 4;
   return new Promise((resolve, reject) => {
     let size = 0;
+    let over = false;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > 1e6) { reject(new ApiError(413, 'Body too large')); req.destroy(); return; }
+      if (over) { if (size > hardMax) req.destroy(); return; }
+      if (size > max) {
+        over = true;
+        chunks.length = 0;
+        reject(new ApiError(413, tooLarge));
+        return;
+      }
       chunks.push(c);
     });
     req.on('end', () => {
+      if (over) return;
       const raw = Buffer.concat(chunks).toString('utf8').trim();
       if (!raw) return resolve({});
       try { resolve(JSON.parse(raw)); }
@@ -1182,6 +1487,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { categories: catalog.categories });
   }
 
+  // Public hours: the same record the booking engine reads, so the hours shown
+  // on the site are always the hours she actually works.
+  if (method === 'GET' && p === '/api/hours') {
+    return sendJson(res, 200, { days: publicHours() });
+  }
+
   if (method === 'GET' && p === '/api/availability') {
     const serviceId = url.searchParams.get('service_id') || '';
     const date = url.searchParams.get('date') || '';
@@ -1206,49 +1517,73 @@ async function handleApi(req, res, url) {
     if (av.blocked) throw new ApiError(409, 'That day is not available');
     if (!av.slots.includes(time)) throw new ApiError(409, 'That time is no longer available');
 
-    const booking = {
-      id: nextId('bk'),
-      client_id: client.id, client_name: client.name,
-      client_email: client.email, client_phone: client.phone,
-      service_id: svc.service_id, service_name: svc.name,
-      price: svc.price, deposit_cents: svc.deposit_cents,
-      date, time, duration_min: svc.duration_min || 30,
-      status: svc.deposit_cents == null ? 'request' : 'awaiting_deposit',
-      notes: cleanStr(body.notes, 500),
-      created_at: new Date().toISOString()
-    };
+    const notes = cleanStr(body.notes, 500);
 
-    // Claim the slot NOW, in the same synchronous turn as the availability
-    // check above. Creating the checkout session is async, and doing it first
-    // yielded the event loop between "is this free?" and "it is mine", which
-    // let two people booking at the same moment both win the same time.
-    db.bookings.push(booking);
-
-    let checkoutUrl = null;
+    // No published deposit means there is nothing to charge up front, so this
+    // stays a request for Ebony to confirm by text.
     if (svc.deposit_cents == null) {
+      const booking = {
+        id: nextId('bk'),
+        client_id: client.id, client_name: client.name,
+        client_email: client.email, client_phone: client.phone,
+        service_id: svc.service_id, service_name: svc.name,
+        price: svc.price, deposit_cents: null,
+        date, time, duration_min: svc.duration_min || 30,
+        status: 'request', notes,
+        created_at: new Date().toISOString()
+      };
+      db.bookings.push(booking);
       notify('booking_request_received',
         { email: client.email, phone: client.phone, name: client.name },
         { booking });
-    } else {
-      let session;
-      try {
-        session = await createCheckout(booking, origin);
-      } catch (err) {
-        // Never leave a slot held by a booking that has no way to be paid.
-        const i = db.bookings.indexOf(booking);
-        if (i >= 0) db.bookings.splice(i, 1);
-        save();
-        throw err;
-      }
-      booking.checkout_session_id = session.id;
-      checkoutUrl = session.url;
-      const absolute = checkoutUrl.startsWith('http') ? checkoutUrl : origin + checkoutUrl;
-      notify('booking_created_awaiting_deposit',
-        { email: client.email, phone: client.phone, name: client.name },
-        { booking, checkout_url: absolute });
+      notifyOwner('owner_booking_request', { booking });
+      save();
+      return sendJson(res, 200, { booking });
     }
+
+    // Deposit first: the deposit is what books the spot, so no appointment
+    // exists yet. Reserve the slot for a few minutes while she pays, claimed
+    // in the same synchronous turn as the availability check above so two
+    // people cannot both win the same time. If she never pays, the hold
+    // expires and the slot is free again within minutes instead of sitting on
+    // the calendar for a day.
+    const hold = {
+      id: nextId('hold'),
+      client_id: client.id,
+      service_id: svc.service_id, service_name: svc.name,
+      price: svc.price, deposit_cents: svc.deposit_cents,
+      date, time, duration_min: svc.duration_min || 30,
+      notes,
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + HOLD_MS).toISOString()
+    };
+    db.holds.push(hold);
+
+    let session;
+    try {
+      session = await createCheckout(hold, origin, 'deposit', svc.deposit_cents, { hold: true });
+    } catch (err) {
+      const i = db.holds.indexOf(hold);
+      if (i >= 0) db.holds.splice(i, 1);
+      save();
+      throw err;
+    }
+    hold.checkout_session_id = session.id;
     save();
-    return sendJson(res, 200, { booking, checkout_url: checkoutUrl });
+    return sendJson(res, 200, { hold, checkout_url: session.url });
+  }
+
+  // Still on the checkout page when the clock runs low.
+  if (method === 'POST' && (m = /^\/api\/holds\/([\w-]+)\/refresh$/.exec(p))) {
+    const client = requireAuth(req);
+    sweepExpiredHolds();
+    const hold = db.holds.find((h) => h.id === m[1]);
+    if (!hold || hold.client_id !== client.id) {
+      throw new ApiError(410, 'That time is no longer being held for you. Please pick a time again.');
+    }
+    hold.expires_at = new Date(Date.now() + HOLD_MS).toISOString();
+    save();
+    return sendJson(res, 200, { hold });
   }
 
   if (method === 'POST' && (m = /^\/api\/bookings\/([\w-]+)\/cancel$/.exec(p))) {
@@ -1265,7 +1600,7 @@ async function handleApi(req, res, url) {
         notify('booking_canceled_by_admin', target, { booking });
       } else {
         notify('booking_canceled_by_client', target, { booking });
-        notify('booking_canceled_admin_copy', { email: ADMIN_EMAILS[0] }, { booking, client_email: booking.client_email });
+        notifyOwner('booking_canceled_admin_copy', { booking, client_email: booking.client_email });
       }
       save();
     }
@@ -1276,6 +1611,25 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && (m = /^\/api\/checkout\/([\w-]+)$/.exec(p))) {
     const session = db.checkout_sessions[m[1]];
     if (!session) throw new ApiError(404, 'Unknown checkout session');
+    // A deposit checkout points at a held slot, not a booking: the
+    // appointment does not exist until this payment clears.
+    if (session.hold_id) {
+      sweepExpiredHolds();
+      const hold = db.holds.find((h) => h.id === session.hold_id);
+      if (!hold) {
+        throw new ApiError(410,
+          'That time was only held for a few minutes and the hold has expired. Nothing was charged.');
+      }
+      requireCheckoutAccess(req, url, session, hold);
+      return sendJson(res, 200, {
+        hold,
+        amount_cents: session.amount_cents,
+        service_name: hold.service_name,
+        payable: !session.paid,
+        already_paid: !!session.paid,
+        expires_at: hold.expires_at,
+      });
+    }
     const booking = db.bookings.find((b) => b.id === session.booking_id);
     if (!booking) throw new ApiError(404, 'Booking not found');
     requireCheckoutAccess(req, url, session, booking);
@@ -1292,6 +1646,26 @@ async function handleApi(req, res, url) {
     // DEMO ONLY simulated payment success.
     const session = db.checkout_sessions[m[1]];
     if (!session) throw new ApiError(404, 'Unknown checkout session');
+
+    // Paying for a held slot: this is the deposit that books the spot, so the
+    // appointment comes into existence here rather than before payment.
+    if (session.hold_id) {
+      sweepExpiredHolds();
+      const hold = db.holds.find((h) => h.id === session.hold_id);
+      if (session.paid) {
+        const already = db.bookings.find((b) => b.checkout_session_id === session.id);
+        if (already) return sendJson(res, 200, { ok: true, booking: withMoney(already), already_paid: true });
+      }
+      if (!hold) {
+        throw new ApiError(410,
+          'That time was only held for a few minutes and the hold has expired. Nothing was charged. Please pick a time again.');
+      }
+      requireCheckoutAccess(req, url, session, hold);
+      session.paid = true;
+      const booking = bookingFromPaidHold(hold, session.id);
+      return sendJson(res, 200, { ok: true, booking: withMoney(booking) });
+    }
+
     const booking = db.bookings.find((b) => b.id === session.booking_id);
     if (!booking) throw new ApiError(404, 'Booking not found');
     requireCheckoutAccess(req, url, session, booking);
@@ -1421,6 +1795,22 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { booking });
   }
 
+  if (method === 'GET' && p === '/api/admin/hours') {
+    requireAdmin(req);
+    return sendJson(res, 200, { days: publicHours() });
+  }
+
+  // She owns her schedule. Saving new hours only changes what can be booked from
+  // now on: every appointment already on the books stays exactly where it is.
+  if (method === 'PUT' && p === '/api/admin/hours') {
+    requireAdmin(req);
+    const body = await readBody(req);
+    const days = parseHoursPayload(body.days);
+    db.hours = days;
+    save();
+    return sendJson(res, 200, { days: publicHours(), affected: bookingsOutsideHours(days) });
+  }
+
   if (method === 'GET' && p === '/api/admin/blocked-days') {
     requireAdmin(req);
     return sendJson(res, 200, { days: db.blocked_days.slice().sort((a, b) => a.date.localeCompare(b.date)) });
@@ -1458,19 +1848,50 @@ async function handleApi(req, res, url) {
 
   if (method === 'POST' && p === '/api/admin/broadcast') {
     requireAdmin(req);
-    const body = await readBody(req);
+    const body = await readBody(req, {
+      max: BROADCAST_BODY_MAX,
+      tooLarge: 'That is more than can be sent at once. Flyers need to be 5 MB or smaller.'
+    });
     const subject = cleanStr(body.subject, 200);
     const message = cleanStr(body.message, 2000);
-    if (!subject || !message) throw new ApiError(400, 'Subject and message are both required');
+    const hasImage = typeof body.image === 'string' && body.image.trim() !== '';
+    // A flyer with no words is fine: the image is the message. Nothing at all
+    // is not, because there would be nothing to send.
+    if (!subject && !message && !hasImage) {
+      throw new ApiError(400, 'Add a subject, a message, or a flyer before you send this.');
+    }
+    // Stored and returned as a same-origin path; the email and text get the
+    // full link so it still works from someone's inbox or phone.
+    const imageUrl = hasImage ? saveFlyer(body.image) : null;
+    const imageLink = imageUrl ? origin + imageUrl : null;
     let sent = 0;
     for (const c of db.clients) {
       if (c.is_admin) continue;
-      notify('broadcast', { email: c.email, phone: c.phone, name: c.name }, { subject, message });
+      notify('broadcast', { email: c.email, phone: c.phone, name: c.name },
+        { subject, message, image_url: imageLink });
       sent += 1;
     }
-    db.broadcasts.push({ ts: new Date().toISOString(), subject, message, sent });
+    db.broadcasts.push({
+      ts: new Date().toISOString(), subject, message,
+      ...(imageUrl ? { image_url: imageUrl } : {}), sent
+    });
     save();
-    return sendJson(res, 200, { sent });
+    return sendJson(res, 200, { sent, ...(imageUrl ? { image_url: imageUrl } : {}) });
+  }
+
+  // What she has already sent, newest first.
+  if (method === 'GET' && p === '/api/admin/broadcasts') {
+    requireAdmin(req);
+    const broadcasts = (db.broadcasts || []).slice()
+      .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')))
+      .map((b) => ({
+        ts: b.ts,
+        subject: b.subject || '',
+        message: b.message || '',
+        ...(b.image_url ? { image_url: b.image_url } : {}),
+        sent: b.sent || 0
+      }));
+    return sendJson(res, 200, { broadcasts });
   }
 
   /* -- demo helpers (hidden when DEMO=0) -- */
@@ -1547,7 +1968,11 @@ function demoCheckoutPage(res, reqUrl) {
   const session = safeId && db.checkout_sessions[safeId];
   const authorized = session && session.pay_token && safeToken &&
     safeTokenEqual(safeToken, session.pay_token);
-  const booking = authorized && db.bookings.find((b) => b.id === session.booking_id);
+  if (authorized && session.hold_id) sweepExpiredHolds();
+  // Either a held slot being paid for, or an existing booking paying a balance.
+  const booking = authorized && (session.hold_id
+    ? db.holds.find((h) => h.id === session.hold_id)
+    : db.bookings.find((b) => b.id === session.booking_id));
 
   let inner;
   if (!session || !authorized || !booking) {
@@ -1802,8 +2227,12 @@ function serveStatic(req, res, url) {
   }
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
-  const headers = { 'Content-Type': type, 'Content-Length': stat.size };
+  // nosniff so nothing served here can be reinterpreted as script or markup.
+  // It matters most for uploads/, which holds files a person sent in.
+  const headers = { 'Content-Type': type, 'Content-Length': stat.size, 'X-Content-Type-Options': 'nosniff' };
   if (ext === '.html') headers['Cache-Control'] = 'no-cache';
+  // Flyer names are unique per upload, so the file at a given path never changes.
+  else if (pathname.startsWith('/' + UPLOADS_DIRNAME + '/')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
   res.writeHead(200, headers);
   if (req.method === 'HEAD') return res.end();
   fs.createReadStream(filePath).pipe(res);
@@ -1821,7 +2250,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { Allow: 'GET, HEAD, POST, DELETE, OPTIONS' });
+    res.writeHead(204, { Allow: 'GET, HEAD, POST, PUT, DELETE, OPTIONS' });
     return res.end();
   }
 

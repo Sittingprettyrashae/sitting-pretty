@@ -24,6 +24,18 @@ function money(cents) {
   return cents % 100 === 0 ? '$' + cents / 100 : '$' + (cents / 100).toFixed(2);
 }
 
+// Everything that reaches the html email is escaped: her own words, her
+// client's name, and the flyer link.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function paragraphs(s) {
+  return esc(s).replace(/\r?\n/g, '<br />');
+}
+
 function when(b) {
   return niceDate(b.date) + ' at ' + niceTime(b.time);
 }
@@ -246,17 +258,127 @@ export function renderNotification(event, data) {
         }
       };
 
-    case 'broadcast':
+    /* ---- what Ebony gets. Never sent to a client. Always names who and
+       gives their number so she can act straight from the message. ---- */
+
+    case 'owner_new_booking': {
+      const who = b.client_name || b.client_email || 'A client';
+      const bal = d.balance_cents;
+      const owed = bal ? money(bal) + ' due at the appointment' : 'balance settled in person';
+      return {
+        email: {
+          subject: 'New booking: ' + who + ', ' + b.service_name + ' on ' + niceDate(b.date),
+          body:
+            who + ' just booked and paid the deposit.\n\n' +
+            summary(b) + '\n' +
+            'Deposit received: ' + money(b.deposit_cents) + '\n' +
+            'Still owed: ' + owed + '\n\n' +
+            'Reach her at ' + (b.client_phone || b.client_email || 'no contact on file') + '\n' +
+            (b.notes ? '\nWhat she said: ' + b.notes + '\n' : '') +
+            '\nThis time is now blocked off for you.\n\nSitting Pretty'
+        },
+        sms: {
+          body:
+            'New booking: ' + who + ', ' + b.service_name + ' ' + when(b) +
+            '. Deposit ' + money(b.deposit_cents) + ' paid. ' +
+            (b.client_phone ? 'Her number: ' + b.client_phone : '')
+        }
+      };
+    }
+
+    case 'owner_booking_request': {
+      const who = b.client_name || b.client_email || 'A client';
+      return {
+        email: {
+          subject: 'Needs your yes: ' + who + ', ' + b.service_name + ' on ' + niceDate(b.date),
+          body:
+            who + ' asked for a time. This service has no set deposit, so it is\n' +
+            'waiting on you.\n\n' +
+            summary(b) + '\n\n' +
+            'Reach her at ' + (b.client_phone || b.client_email || 'no contact on file') + '\n' +
+            (b.notes ? '\nWhat she said: ' + b.notes + '\n' : '') +
+            '\nConfirm or cancel it in your dashboard.\n\nSitting Pretty'
+        },
+        sms: {
+          body:
+            'Booking request: ' + who + ', ' + b.service_name + ' ' + when(b) +
+            '. Needs your yes. ' + (b.client_phone ? 'Her number: ' + b.client_phone : '')
+        }
+      };
+    }
+
+    case 'owner_balance_paid': {
+      const who = b.client_name || b.client_email || 'A client';
+      return {
+        email: {
+          subject: 'Paid in full: ' + who + ' on ' + niceDate(b.date),
+          body:
+            who + ' just paid the rest online.\n\n' +
+            summary(b) + '\n' +
+            'Paid online: ' + money(d.amount_cents) + '\n\n' +
+            'Nothing to collect at this appointment.\n\nSitting Pretty'
+        },
+        sms: {
+          body:
+            who + ' paid the rest of ' + b.service_name + ' (' + when(b) +
+            ') online. Nothing to collect.'
+        }
+      };
+    }
+
+    case 'owner_deposit_expired': {
+      const who = b.client_name || b.client_email || 'A client';
+      return {
+        email: {
+          subject: 'Slot reopened: ' + who + ' never paid the deposit',
+          body:
+            who + ' did not pay the deposit in time, so this appointment was\n' +
+            'cancelled and the time is open again.\n\n' +
+            summary(b) + '\n\n' +
+            'Reach her at ' + (b.client_phone || b.client_email || 'no contact on file') +
+            ' if you want to give her another shot.\n\nSitting Pretty'
+        },
+        sms: {
+          body:
+            who + ' never paid the deposit for ' + when(b) + '. That time is open again.'
+        }
+      };
+    }
+
+    case 'broadcast': {
+      // A broadcast can be words, a flyer, or both. The flyer goes above the
+      // message in the email and is linked full size underneath it. A text
+      // cannot carry a picture, so the text version links the flyer instead of
+      // quietly dropping it.
+      const flyer = typeof d.image_url === 'string' ? d.image_url.trim() : '';
+      const words = String(d.message || '').trim();
+      const emailParts = ['Hi ' + name + ','];
+      if (flyer) emailParts.push('Here is the flyer: ' + flyer);
+      if (words) emailParts.push(words);
+      emailParts.push('Sitting Pretty\n' + PHONE);
+      const html = flyer
+        ? '<div style="font-family:sans-serif;line-height:1.5;color:#3a2530">' +
+          '<p>Hi ' + esc(name) + ',</p>' +
+          '<p><a href="' + esc(flyer) + '"><img src="' + esc(flyer) + '" ' +
+          'alt="Flyer from Sitting Pretty" style="max-width:100%;height:auto;border-radius:14px;border:0" /></a></p>' +
+          '<p><a href="' + esc(flyer) + '">See the flyer full size</a></p>' +
+          (words ? '<p>' + paragraphs(words) + '</p>' : '') +
+          '<p>Sitting Pretty<br />' + esc(PHONE) + '</p>' +
+          '</div>'
+        : null;
+      let smsBody;
+      if (words && flyer) smsBody = 'Sitting Pretty: ' + words + ' Flyer: ' + flyer;
+      else if (words) smsBody = 'Sitting Pretty: ' + words;
+      else smsBody = 'Sitting Pretty: here is a flyer for you: ' + flyer;
       return {
         email: {
           subject: d.subject || 'A note from Sitting Pretty',
-          body:
-            'Hi ' + name + ',\n\n' +
-            d.message + '\n\n' +
-            'Sitting Pretty\n' + PHONE
+          body: emailParts.join('\n\n'),
+          ...(html ? { html } : {})
         },
-        sms: { body: 'Sitting Pretty: ' + d.message }
+        sms: { body: smsBody }
       };
+    }
 
     default:
       return {

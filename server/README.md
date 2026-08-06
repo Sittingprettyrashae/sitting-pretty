@@ -28,6 +28,7 @@ other machines on the network.
 | `GOOGLE_CLIENT_ID` | unset | Set together with the secret to run the real Google OAuth flow. |
 | `GOOGLE_CLIENT_SECRET` | unset | If either is missing, Google sign-in uses the built-in `/demo-google` account chooser instead. Authorized redirect URI for Google: `http://localhost:4870/api/auth/google/callback`. |
 | `DEMO` | `1` (on) | Demo helper endpoints `GET /api/_outbox` and `POST /api/_reset` are on by default so the demo login flow works. Set `DEMO=0` to disable both (they 404). |
+| `DB_PATH` | `server/db.json` | Where the data file lives. Point a second copy of the server at another file (with another `PORT`) to test without touching the demo's data. |
 
 Note: the `/api/stripe/webhook` endpoint does NOT verify the Stripe signature.
 That is fine for this local demo; production must verify `Stripe-Signature`.
@@ -82,6 +83,53 @@ dashboard, by any of the three ways above.
 Code requests are rate limited: 5 per email and 5 per IP every 15 minutes,
 then `429`.
 
+## Her hours
+
+Hours are data, not code. `db.hours` holds all seven days
+(`{weekday, closed, open, close}`, weekday 0 is Sunday), and the availability
+engine, the dashboard, and the hours table on the public site all read that one
+record. Her site can never advertise hours she does not work.
+
+- `GET /api/hours` is public. `GET /api/admin/hours` and `PUT /api/admin/hours`
+  are hers.
+- Seeded with her real schedule: Sunday closed, Monday to Friday 09:00 to 20:00,
+  Saturday 09:00 to 18:00. She can change any of it from her phone.
+- Saving checks all seven days are there once each, that closing is later than
+  opening, and that times land on the hour or the half hour. Every refusal is a
+  plain sentence naming the day, because she is the one reading it.
+- A `db.json` from an older build has no hours at all. It gets her real ones on
+  load, and so does a record that has been damaged: the shop is never left with
+  no hours.
+
+**Changing hours never touches an existing booking.** Appointments already on
+the books were promised to a client, so nothing is cancelled, moved, or hidden.
+Only new bookings are held to the new hours. The `PUT` response carries
+`affected`: the non-cancelled future bookings that now sit outside her hours, so
+the dashboard can show her which ones she may want to text about. Verified end
+to end: a 7:00 PM appointment booked on a Wednesday is still on the dashboard,
+still on the client's own list, and still at 7:00 PM after that Wednesday is
+closed, while a new 7:00 PM booking that day is refused.
+
+## Broadcast and flyers
+
+`POST /api/admin/broadcast` `{subject, message, image?}` sends one message to
+every client, email and SMS, and logs it. `GET /api/admin/broadcasts` lists what
+she has already sent, newest first.
+
+- `image` is a flyer as a data URL. JPG, PNG, or WEBP, 5 MB or smaller once
+  decoded. The bytes have to actually be that kind of image: a file that only
+  claims to be a PNG is refused.
+- Flyers are written to `uploads/` at the project root with a name the server
+  invents, and served back at `/uploads/<name>`. That directory is gitignored,
+  so flyers never end up in the repo or on the published site.
+- The email puts the flyer above her message and links it full size. A text
+  message cannot carry a picture, so the SMS gets the flyer link appended
+  instead of losing it.
+- A flyer with no words is fine, the picture is the message. Nothing at all
+  (no subject, no message, no flyer) is refused.
+- Only this route takes a bigger request body (8 MB, enough for a 5 MB flyer
+  once it is base64). Everything else is still capped at 1 MB.
+
 ## Migration: accounts made before passwords existed
 
 Nothing breaks. A client record with no password (every account created by the
@@ -122,7 +170,15 @@ sliding expiry on their next request.
 - Static file serving resolves the real on-disk path and refuses anything
   outside the project root or inside `server/`, `supabase/`, `.git`, or any
   dotfile path. The check is per path segment and case-insensitive, so
-  `/Server/db.json` is just as blocked as `/server/db.json` on macOS.
+  `/Server/db.json` is just as blocked as `/server/db.json` on macOS. Adding
+  `uploads/` did not loosen any of that: it is an ordinary folder inside the
+  root, and the refusals above were re-checked after the change.
+- Flyers are only ever written by the server, under a name the server picks,
+  with an extension that matches what the bytes really are (the JPG, PNG, and
+  WEBP signatures are checked, not the label on the data URL). Nothing a caller
+  sends decides the filename or the path. Every static response now carries
+  `X-Content-Type-Options: nosniff`, so an uploaded file cannot be talked into
+  running as script or markup.
 - Checkout endpoints (`GET /api/checkout/:id`, `POST /api/checkout/:id/pay`)
   require either the booking owner's auth token (admin also allowed) or the
   one-time `pay_token` that the server generates with each checkout session and
@@ -141,15 +197,17 @@ sliding expiry on their next request.
 
 ## Where things live
 
-- `server/db.json`: all data (clients, bookings, sessions, blocked days,
+- `server/db.json`: all data (clients, bookings, sessions, hours, blocked days,
   outbox, broadcasts). JSON file, saved automatically a moment after each
   change. Delete it to start fresh. Never commit it (see `.gitignore`).
+- `uploads/`: flyers sent with a broadcast, served at `/uploads/<name>`.
+  Gitignored. Safe to empty at any time; only past broadcasts point at it.
 - Outbox: every email and SMS the system "sends" is stored newest first,
   capped at 200 messages. Read it at `GET /api/_outbox` (requires `DEMO` on).
 - `POST /api/_reset`: reseeds the demo data (3 demo clients, 5 sample bookings
   across the next week, and the admin account). Also signs everyone out, puts
-  `tasha@demo.local` back to the demo password above, and clears the rate-limit
-  counters. Requires `DEMO` on.
+  `tasha@demo.local` back to the demo password above, puts her hours back to
+  the seeded schedule, and clears the rate-limit counters. Requires `DEMO` on.
 - Service catalog: derived at boot from `services-data.js` in the project root,
   including durations and deposit amounts, so the client and server always
   agree. Restart the server after editing that file.

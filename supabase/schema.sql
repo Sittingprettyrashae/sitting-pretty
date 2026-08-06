@@ -181,7 +181,67 @@ create table if not exists public.blocked_days (
 );
 
 -- ---------------------------------------------------------------------------
+-- hours: her working week, one row per weekday. HOURS ARE DATA, NOT CODE.
+--
+-- This is the single source of truth read by the availability engine
+-- (functions/api/bookings.ts), her dashboard, and the hours table on the
+-- public site, so the site can never advertise hours she does not work.
+--
+-- weekday  0 = Sunday .. 6 = Saturday (matches JavaScript getUTCDay()).
+-- closed   true = she does not work that day at all; open/close are null.
+-- open,
+-- close    "HH:MM" 24h, on the half hour, open strictly before close.
+--
+-- The check constraints below are the same rules PUT /api/admin/hours
+-- enforces, so a bad row cannot get in even from a SQL console.
+-- ---------------------------------------------------------------------------
+create table if not exists public.hours (
+  weekday smallint primary key check (weekday between 0 and 6),
+  closed boolean not null default false,
+  open text,
+  close text,
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'hours_open_format') then
+    alter table public.hours add constraint hours_open_format
+      check (open is null or open ~ '^([01][0-9]|2[0-3]):(00|30)$');
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'hours_close_format') then
+    alter table public.hours add constraint hours_close_format
+      check (close is null or close ~ '^([01][0-9]|2[0-3]):(00|30)$');
+  end if;
+  -- A closed day carries no times; an open day carries both, in order.
+  -- String comparison is safe because both are zero-padded HH:MM.
+  if not exists (select 1 from pg_constraint where conname = 'hours_shape') then
+    alter table public.hours add constraint hours_shape
+      check (
+        (closed and open is null and close is null)
+        or (not closed and open is not null and close is not null and open < close)
+      );
+  end if;
+end $$;
+
+-- Her real current hours, from StyleSeat. These are the DEFAULT of an
+-- editable record, not hardcoded logic: `do nothing` means re-running this
+-- file never overwrites a change she made in her dashboard, and it restores
+-- any weekday row that somehow went missing.
+insert into public.hours (weekday, closed, open, close) values
+  (0, true,  null,    null),
+  (1, false, '09:00', '20:00'),
+  (2, false, '09:00', '20:00'),
+  (3, false, '09:00', '20:00'),
+  (4, false, '09:00', '20:00'),
+  (5, false, '09:00', '20:00'),
+  (6, false, '09:00', '18:00')
+on conflict (weekday) do nothing;
+
+-- ---------------------------------------------------------------------------
 -- broadcasts: master messages sent to every client from the dashboard.
+-- image_url is the flyer she attached, already uploaded to Storage (see the
+-- flyers bucket below). Null when she sent words only.
 -- ---------------------------------------------------------------------------
 create table if not exists public.broadcasts (
   id uuid primary key default gen_random_uuid(),
@@ -190,6 +250,48 @@ create table if not exists public.broadcasts (
   sent_count integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.broadcasts
+  add column if not exists image_url text;
+
+-- ---------------------------------------------------------------------------
+-- flyers: the Storage bucket her broadcast flyers land in.
+--
+-- Public on purpose. The image has to load inside an email and on whatever
+-- phone opens it, and signed URLs expire, which would leave a broken picture
+-- in a message she already sent. Nothing private is ever put here: it holds
+-- marketing flyers she is deliberately sending to every client.
+--
+-- Uploads happen in the edge function with the service role key AFTER
+-- requireAdmin, so only she can put a file here. There is no browser upload
+-- path and no policy granting one.
+--
+-- Guarded so this file still runs on a plain Postgres without the storage
+-- schema (a local psql, a test database).
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if exists (select 1 from pg_namespace where nspname = 'storage') then
+    insert into storage.buckets (id, name, public)
+    values ('flyers', 'flyers', true)
+    on conflict (id) do update set public = true;
+
+    -- Anyone can read a flyer (that is the point of sending it). No insert,
+    -- update, or delete policy: the only writer is the service role.
+    --
+    -- Belt and braces, not the mechanism: a public bucket already serves
+    -- reads through /storage/v1/object/public/. Some projects do not let SQL
+    -- run here own storage.objects, and that must never stop the rest of
+    -- this file from applying.
+    begin
+      drop policy if exists flyers_public_read on storage.objects;
+      create policy flyers_public_read on storage.objects
+        for select to anon, authenticated using (bucket_id = 'flyers');
+    exception when insufficient_privilege then
+      raise notice 'sitting pretty: skipped the flyers read policy (not the owner of storage.objects). The public bucket still serves flyers.';
+    end;
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- notifications_log: every rendered notification, whether it was actually
@@ -445,12 +547,19 @@ grant execute on function public.sp_sync_client(uuid) to service_role;
 --  - the clients row is created by the auth trigger, not by the browser
 -- No anon policies on purpose: nobody signed out can probe whether an email
 -- has an account here.
+--
+-- hours is the one exception: it is published information. Anyone can read
+-- it (the public site prints it), and NOBODY can write it through the Data
+-- API, not even her, because there is no insert/update/delete policy. Her
+-- edits go through PUT /api/admin/hours, which checks is_admin and validates
+-- the whole week before writing with the service role key.
 -- ---------------------------------------------------------------------------
 alter table public.clients enable row level security;
 alter table public.bookings enable row level security;
 alter table public.blocked_days enable row level security;
 alter table public.broadcasts enable row level security;
 alter table public.notifications_log enable row level security;
+alter table public.hours enable row level security;
 
 drop policy if exists clients_select_own on public.clients;
 create policy clients_select_own on public.clients
@@ -459,6 +568,10 @@ create policy clients_select_own on public.clients
 drop policy if exists bookings_select_own on public.bookings;
 create policy bookings_select_own on public.bookings
   for select to authenticated using ((select auth.uid()) = client_id);
+
+drop policy if exists hours_public_read on public.hours;
+create policy hours_public_read on public.hours
+  for select to anon, authenticated using (true);
 
 -- blocked_days, broadcasts, notifications_log: no client policies at all.
 -- Only the service role reads or writes them.

@@ -22,12 +22,41 @@
     loginEmail: "",
     codePurpose: "login",
     outboxAvailable: false,
-    outboxMessages: []
+    outboxMessages: [],
+    // Her hours are data, not code: saved copy plus the copy she is editing.
+    hours: null,
+    hoursDraft: null,
+    hoursLoaded: false,
+    hoursSaving: false,
+    // Flyer picked for the next broadcast: {dataUrl, name, bytes}.
+    flyer: null
   };
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTHS_FULL = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var DAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  // What her week looks like today, and what a brand new record starts as.
+  var DEFAULT_HOURS = [
+    { weekday: 0, closed: true, open: null, close: null },
+    { weekday: 1, closed: false, open: "09:00", close: "20:00" },
+    { weekday: 2, closed: false, open: "09:00", close: "20:00" },
+    { weekday: 3, closed: false, open: "09:00", close: "20:00" },
+    { weekday: 4, closed: false, open: "09:00", close: "20:00" },
+    { weekday: 5, closed: false, open: "09:00", close: "20:00" },
+    { weekday: 6, closed: false, open: "09:00", close: "18:00" }
+  ];
+
+  // A closed day still remembers times, so turning it back on is one tap.
+  var FALLBACK_OPEN = "09:00";
+  var FALLBACK_CLOSE = "18:00";
+
+  var MAX_FLYER_BYTES = 5 * 1024 * 1024;      // the server's limit
+  var FLYER_TARGET_BYTES = 4.6 * 1024 * 1024; // stay clear of it
+  var FLYER_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  // Longest edge and quality, tried in order until the picture fits.
+  var FLYER_STEPS = [[1600, 0.85], [1280, 0.78], [1000, 0.7], [800, 0.62]];
 
   var STATUS_META = {
     awaiting_deposit: { label: "Deposit due", chip: "chip-awaiting" },
@@ -135,6 +164,13 @@
       body: body == null ? undefined : JSON.stringify(body)
     });
   }
+  function apiPut(path, body) {
+    return window.SP.request(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: body == null ? undefined : JSON.stringify(body)
+    });
+  }
   function apiDelete(path) { return window.SP.request(path, { method: "DELETE" }); }
 
   // ---------------- toast ----------------
@@ -217,6 +253,9 @@
       state.clients = (res && res.clients) || [];
       if (state.view === "clients") renderClients();
     }).catch(function () { /* loaded again when the tab opens */ });
+
+    // The calendar needs her closed days, so hours load with everything else.
+    loadHours();
   }
 
   function refreshBookings() {
@@ -448,7 +487,8 @@
       var dow = new Date(y, m, day).getDay();
       var n = counts[dateStr] || 0;
       var isBlocked = !!blocked[dateStr];
-      if (dow === 0) {
+      // Closed days come from her hours record, so changing them changes this.
+      if (closedWeekday(dow)) {
         html += '<div class="cal-day cal-closed"><span class="cal-num">' + day + '</span><span class="cal-closed-label">closed</span><span class="sr-only">' + esc(fmtDateLong(dateStr)) + ", closed</span></div>";
         continue;
       }
@@ -538,6 +578,296 @@
     }
   }
 
+  // ---------------- hours view ----------------
+  // The record is the single source of truth (API.md "Hours"). The dashboard
+  // edits a draft copy so nothing changes for her clients until she taps Save.
+  function hhmm(v, fallback) {
+    var s = String(v == null ? "" : v);
+    return /^\d{2}:\d{2}/.test(s) ? s.slice(0, 5) : fallback;
+  }
+
+  function normalizeHours(days) {
+    var out = [];
+    for (var wd = 0; wd < 7; wd++) {
+      var found = null;
+      if (days && days.length) {
+        for (var i = 0; i < days.length; i++) {
+          if (days[i] && Number(days[i].weekday) === wd) { found = days[i]; break; }
+        }
+      }
+      var base = found || DEFAULT_HOURS[wd];
+      var dflt = DEFAULT_HOURS[wd];
+      out.push({
+        weekday: wd,
+        closed: !!base.closed,
+        // Closed days keep times in the box so turning one on is one tap.
+        open: hhmm(base.open, hhmm(dflt.open, FALLBACK_OPEN)),
+        close: hhmm(base.close, hhmm(dflt.close, FALLBACK_CLOSE))
+      });
+    }
+    return out;
+  }
+
+  // Times on a closed day do not count, so they never make Save look enabled.
+  function hoursKey(days) {
+    return (days || []).map(function (d) {
+      return d.weekday + (d.closed ? ":closed" : ":" + d.open + "-" + d.close);
+    }).join("|");
+  }
+
+  function hoursChanged() {
+    if (!state.hoursDraft || !state.hours) return false;
+    return hoursKey(state.hoursDraft) !== hoursKey(state.hours);
+  }
+
+  function draftDay(wd) {
+    var days = state.hoursDraft || [];
+    for (var i = 0; i < days.length; i++) {
+      if (days[i].weekday === Number(wd)) return days[i];
+    }
+    return null;
+  }
+
+  function closedWeekday(dow) {
+    var days = state.hours;
+    if (!days) return dow === 0;
+    for (var i = 0; i < days.length; i++) {
+      if (days[i].weekday === dow) return !!days[i].closed;
+    }
+    return false;
+  }
+
+  function setHoursError(msg) {
+    var el = $("hours-error");
+    if (msg) { el.textContent = msg; el.hidden = false; }
+    else { el.textContent = ""; el.hidden = true; }
+  }
+
+  function clearHoursNotices() {
+    setHoursError("");
+    $("hours-saved").hidden = true;
+    $("hours-affected").hidden = true;
+    $("hours-affected").innerHTML = "";
+  }
+
+  function updateHoursButtons() {
+    var changed = hoursChanged();
+    $("hours-save").disabled = state.hoursSaving || !changed;
+    $("hours-cancel").disabled = state.hoursSaving || !changed;
+  }
+
+  function savedDay(wd) {
+    var days = state.hours || [];
+    for (var i = 0; i < days.length; i++) {
+      if (days[i].weekday === Number(wd)) return days[i];
+    }
+    return null;
+  }
+
+  // A row counts as edited once its times differ from what is saved. That is
+  // what brings the "use these times everywhere" shortcut into view.
+  function rowEdited(d) {
+    var saved = savedDay(d.weekday);
+    if (!saved || d.closed || saved.closed) return false;
+    return saved.open !== d.open || saved.close !== d.close;
+  }
+
+  function hoursRow(d) {
+    var wd = d.weekday;
+    var open = !d.closed;
+    var html = '<div class="hrow' + (open ? "" : " hrow-off") + (rowEdited(d) ? " hrow-edited" : "") + '" data-row="' + wd + '">';
+    html += '<div class="hrow-top"><span class="hrow-day">' + DAYS_FULL[wd] + "</span>";
+    html += '<button class="hswitch" type="button" data-toggle="' + wd + '" aria-pressed="' + (open ? "true" : "false") + '">';
+    html += '<span class="sr-only">' + DAYS_FULL[wd] + " </span>";
+    html += '<span class="hswitch-text">' + (open ? "Open" : "Closed") + "</span>";
+    html += '<span class="hswitch-track" aria-hidden="true"><span class="hswitch-thumb"></span></span>';
+    html += "</button></div>";
+    html += '<div class="hrow-times">';
+    html += '<span class="htime"><label class="field-label" for="hopen-' + wd + '">Start</label>' +
+      '<input id="hopen-' + wd + '" class="field field-time" type="time" step="1800" value="' + esc(d.open) +
+      '" data-time="open" data-weekday="' + wd + '"></span>';
+    html += '<span class="htime"><label class="field-label" for="hclose-' + wd + '">Finish</label>' +
+      '<input id="hclose-' + wd + '" class="field field-time" type="time" step="1800" value="' + esc(d.close) +
+      '" data-time="close" data-weekday="' + wd + '"></span>';
+    html += "</div>";
+    html += '<button class="hcopy" type="button" data-copy="' + wd + '">Use these times on my other open days</button>';
+    html += "</div>";
+    return html;
+  }
+
+  function renderHours() {
+    if (!state.hoursDraft) state.hoursDraft = normalizeHours(state.hours);
+    $("hours-rows").innerHTML = state.hoursDraft.map(hoursRow).join("");
+    updateHoursButtons();
+  }
+
+  // Toggling updates that one row in place, so her finger stays where it was.
+  function toggleHoursDay(wd) {
+    var d = draftDay(wd);
+    if (!d) return;
+    d.closed = !d.closed;
+    if (!d.closed) {
+      d.open = hhmm(d.open, FALLBACK_OPEN);
+      d.close = hhmm(d.close, FALLBACK_CLOSE);
+    }
+    var row = document.querySelector('.hrow[data-row="' + wd + '"]');
+    if (row) {
+      var btn = row.querySelector(".hswitch");
+      var text = row.querySelector(".hswitch-text");
+      if (d.closed) row.classList.add("hrow-off");
+      else row.classList.remove("hrow-off");
+      if (btn) btn.setAttribute("aria-pressed", d.closed ? "false" : "true");
+      if (text) text.textContent = d.closed ? "Closed" : "Open";
+      var oi = row.querySelector('input[data-time="open"]');
+      var ci = row.querySelector('input[data-time="close"]');
+      if (oi) oi.value = d.open;
+      if (ci) ci.value = d.close;
+    }
+    clearHoursNotices();
+    updateHoursButtons();
+  }
+
+  function copyHoursFrom(wd) {
+    var src = draftDay(wd);
+    if (!src || src.closed) return;
+    var n = 0;
+    state.hoursDraft.forEach(function (d) {
+      if (d.weekday === src.weekday || d.closed) return;
+      d.open = src.open;
+      d.close = src.close;
+      n++;
+    });
+    clearHoursNotices();
+    renderHours();
+    var back = document.querySelector('.hcopy[data-copy="' + wd + '"]');
+    if (back) back.focus();
+    if (n) toast("Copied your " + DAYS_FULL[wd] + " times to your other open days.");
+    else toast("Turn another day on first, then you can copy these times to it.");
+  }
+
+  function hoursProblem() {
+    var days = state.hoursDraft || [];
+    for (var i = 0; i < days.length; i++) {
+      var d = days[i];
+      if (d.closed) continue;
+      var name = DAYS_FULL[d.weekday];
+      if (!/^\d{2}:\d{2}$/.test(d.open) || !/^\d{2}:\d{2}$/.test(d.close)) {
+        return name + " needs a start time and a finish time.";
+      }
+      var om = d.open.slice(3), cm = d.close.slice(3);
+      if ((om !== "00" && om !== "30") || (cm !== "00" && cm !== "30")) {
+        return "Times need to land on the hour or the half hour, like 9:00 or 9:30. Check " + name + ".";
+      }
+      if (d.open >= d.close) {
+        return "On " + name + " your finish time needs to be later than your start time.";
+      }
+    }
+    return null;
+  }
+
+  function firstName(s) {
+    var v = String(s == null ? "" : s).trim();
+    if (!v) return "";
+    return v.split(/\s+/)[0];
+  }
+  function smsHref(phone) {
+    var digits = String(phone == null ? "" : phone).replace(/[^0-9+]/g, "");
+    return digits ? "sms:" + digits : "";
+  }
+
+  // Appointments that now sit outside her hours. They are NOT canceled, and
+  // the copy has to say so plainly: only she can move a client's time.
+  function renderAffected(list) {
+    var box = $("hours-affected");
+    if (!list || !list.length) {
+      box.innerHTML = "";
+      box.hidden = true;
+      return;
+    }
+    var n = list.length;
+    var html = '<div class="affected-box"><h3>' + n +
+      (n === 1 ? " appointment is" : " appointments are") + " already booked outside your new hours</h3>";
+    html += '<p class="affected-note">Nothing was canceled. These appointments are still on the books, at the same time as before. If you want to move one, text the client and pick a new time together.</p>';
+    html += '<ul class="affected-list">';
+    list.forEach(function (b) {
+      var who = b.client_name || b.client_email || "Client";
+      html += '<li><span class="affected-who"><strong>' + esc(who) + "</strong>";
+      html += "<span>" + esc(b.service_name || b.service_id || "Appointment") + "</span>";
+      html += "<span>" + esc(fmtDate(b.date) + " at " + fmtTime(b.time)) + "</span></span>";
+      var sms = smsHref(b.client_phone);
+      if (sms) {
+        var fn = firstName(b.client_name);
+        html += '<a class="btn btn-ghost btn-sm" href="' + esc(sms) + '">Text' + (fn ? " " + esc(fn) : "") + "</a>";
+      }
+      html += "</li>";
+    });
+    html += "</ul></div>";
+    box.innerHTML = html;
+    box.hidden = false;
+  }
+
+  function saveHours() {
+    if (state.hoursSaving) return;
+    var problem = hoursProblem();
+    if (problem) { setHoursError(problem); return; }
+    clearHoursNotices();
+    var payload = state.hoursDraft.map(function (d) {
+      return d.closed
+        ? { weekday: d.weekday, closed: true }
+        : { weekday: d.weekday, closed: false, open: d.open, close: d.close };
+    });
+    var btn = $("hours-save");
+    state.hoursSaving = true;
+    btn.textContent = "Saving";
+    updateHoursButtons();
+    apiPut("/api/admin/hours", { days: payload })
+      .then(function (res) {
+        state.hoursSaving = false;
+        btn.textContent = "Save hours";
+        state.hours = normalizeHours((res && res.days) || payload);
+        state.hoursDraft = normalizeHours(state.hours);
+        state.hoursLoaded = true;
+        renderHours();
+        $("hours-saved").textContent = "Saved. Your site and your booking times follow these hours now.";
+        $("hours-saved").hidden = false;
+        toast("Hours saved.");
+        renderAffected((res && res.affected) || []);
+        renderCalendar();
+      })
+      .catch(function (err) {
+        state.hoursSaving = false;
+        btn.textContent = "Save hours";
+        updateHoursButtons();
+        setHoursError(errMsg(err));
+      });
+  }
+
+  function cancelHours() {
+    state.hoursDraft = normalizeHours(state.hours);
+    clearHoursNotices();
+    renderHours();
+    toast("Back to your saved hours.");
+  }
+
+  function loadHours() {
+    return api("/api/admin/hours").then(function (res) {
+      var fresh = normalizeHours(res && res.days);
+      var keepDraft = state.hoursLoaded && hoursChanged();
+      state.hours = fresh;
+      state.hoursLoaded = true;
+      if (!keepDraft) state.hoursDraft = normalizeHours(fresh);
+      renderHours();
+      renderCalendar();
+    }).catch(function () {
+      // Show her real week either way, so the page is never blank.
+      if (!state.hours) {
+        state.hours = normalizeHours(null);
+        state.hoursDraft = normalizeHours(state.hours);
+        renderHours();
+      }
+    });
+  }
+
   // ---------------- clients view ----------------
   function renderClients() {
     var q = $("client-search").value.trim().toLowerCase();
@@ -577,15 +907,145 @@
     $("suggest-chips").innerHTML = html;
   }
 
+  // ---- flyer: a picture that rides along with the message ----
+  function fmtBytes(n) {
+    var v = Number(n) || 0;
+    if (v < 1024) return v + " bytes";
+    if (v < 1024 * 1024) return Math.round(v / 1024) + " KB";
+    return (v / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function dataUrlBytes(dataUrl) {
+    var s = String(dataUrl || "");
+    var i = s.indexOf(",");
+    if (i < 0) return 0;
+    var b64 = s.slice(i + 1);
+    var pad = 0;
+    if (b64.charAt(b64.length - 1) === "=") pad++;
+    if (b64.charAt(b64.length - 2) === "=") pad++;
+    return Math.max(0, Math.floor(b64.length * 3 / 4) - pad);
+  }
+
+  function setFlyerError(msg) {
+    var el = $("bc-flyer-error");
+    if (msg) { el.textContent = msg; el.hidden = false; }
+    else { el.textContent = ""; el.hidden = true; }
+  }
+
+  // Phone photos are far too big to email, so the picture is redrawn smaller
+  // right here on her phone before it ever leaves it.
+  function shrinkToDataUrl(img) {
+    var w = img.naturalWidth || img.width;
+    var h = img.naturalHeight || img.height;
+    if (!w || !h) return null;
+    for (var i = 0; i < FLYER_STEPS.length; i++) {
+      var maxEdge = FLYER_STEPS[i][0];
+      var quality = FLYER_STEPS[i][1];
+      var scale = Math.min(1, maxEdge / Math.max(w, h));
+      var cw = Math.max(1, Math.round(w * scale));
+      var ch = Math.max(1, Math.round(h * scale));
+      var canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      var ctx = canvas.getContext ? canvas.getContext("2d") : null;
+      if (!ctx) return null;
+      // See-through corners in a PNG would turn black as a JPEG, so paint white.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(img, 0, 0, cw, ch);
+      var url;
+      try { url = canvas.toDataURL("image/jpeg", quality); } catch (e) { return null; }
+      if (dataUrlBytes(url) <= FLYER_TARGET_BYTES && dataUrlBytes(url) <= MAX_FLYER_BYTES) return url;
+    }
+    return null;
+  }
+
+  function setFlyer(f) {
+    state.flyer = f;
+    $("bc-flyer-thumb").src = f.dataUrl;
+    $("bc-flyer-name").textContent = f.name;
+    $("bc-flyer-size").textContent = "Ready to send, about " + fmtBytes(f.bytes) + ".";
+    $("bc-flyer-preview").hidden = false;
+    $("bc-file-label").textContent = "Choose a different flyer";
+    $("bc-result").hidden = true;
+    updatePreview();
+  }
+
+  function clearFlyer() {
+    state.flyer = null;
+    $("bc-flyer-preview").hidden = true;
+    $("bc-flyer-thumb").removeAttribute("src");
+    $("bc-file-label").textContent = "Add a flyer";
+    $("bc-image").value = "";
+    setFlyerError("");
+    updatePreview();
+  }
+
+  function handleFlyerFile(file) {
+    if (!file) return;
+    setFlyerError("");
+    if (FLYER_TYPES.indexOf(file.type) === -1) {
+      $("bc-image").value = "";
+      setFlyerError("That file is not a picture I can send. Use a JPG, PNG, or WEBP.");
+      return;
+    }
+    $("bc-flyer-busy").hidden = false;
+    var fail = function (msg) {
+      $("bc-flyer-busy").hidden = true;
+      $("bc-image").value = "";
+      setFlyerError(msg);
+    };
+    var reader = new FileReader();
+    reader.onerror = function () { fail("I could not open that picture. Try another one."); };
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        $("bc-flyer-busy").hidden = true;
+        var url = shrinkToDataUrl(img);
+        if (!url) { fail("That picture is too big to send. Try a smaller one."); return; }
+        setFlyer({ dataUrl: url, name: file.name || "Your flyer", bytes: dataUrlBytes(url) });
+      };
+      img.onerror = function () { fail("I could not open that picture. Try another one."); };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
   function updatePreview() {
     var s = $("bc-subject").value;
     var m = $("bc-message").value;
+    var hasFlyer = !!state.flyer;
     $("pv-email-subject").textContent = s.trim() ? s : "Your subject will show here.";
-    $("pv-email-body").innerHTML = m.trim() ? escBr(m) : "Your message will show here.";
-    $("pv-sms-body").innerHTML = m.trim() ? escBr(m) : "Your message will show here.";
+
+    // Email: the flyer sits above the words, the way the client sees it.
+    var emailFlyer = $("pv-email-flyer");
+    if (hasFlyer) {
+      emailFlyer.src = state.flyer.dataUrl;
+      emailFlyer.hidden = false;
+    } else {
+      emailFlyer.hidden = true;
+      emailFlyer.removeAttribute("src");
+    }
+
+    var emailBody = $("pv-email-body");
+    if (m.trim()) { emailBody.innerHTML = escBr(m); emailBody.hidden = false; }
+    else if (hasFlyer) { emailBody.hidden = true; }
+    else { emailBody.textContent = "Your message will show here."; emailBody.hidden = false; }
+
+    // Text messages cannot carry a picture, so a link to it goes along instead.
+    var smsBody = $("pv-sms-body");
+    if (m.trim()) { smsBody.innerHTML = escBr(m); smsBody.hidden = false; }
+    else if (hasFlyer) { smsBody.hidden = true; }
+    else { smsBody.textContent = "Your message will show here."; smsBody.hidden = false; }
+    $("pv-sms-flyer").hidden = !hasFlyer;
+
     var countEl = $("pv-sms-count");
     if (m.trim()) {
-      countEl.textContent = m.length + (m.length === 1 ? " character" : " characters");
+      countEl.textContent = m.length + (m.length === 1 ? " character" : " characters") +
+        (hasFlyer ? ", plus the flyer link" : "");
+      countEl.hidden = false;
+    } else if (hasFlyer) {
+      countEl.textContent = "Just the flyer link";
       countEl.hidden = false;
     } else {
       countEl.hidden = true;
@@ -603,13 +1063,17 @@
   function sendBroadcast() {
     var subject = $("bc-subject").value.trim();
     var message = $("bc-message").value.trim();
+    var flyer = state.flyer;
+    var body = { subject: subject, message: message };
+    if (flyer) body.image = flyer.dataUrl;
     $("bc-send-yes").disabled = true;
     $("bc-send-no").disabled = true;
     $("bc-send-yes").textContent = "Sending";
-    apiPost("/api/admin/broadcast", { subject: subject, message: message })
+    apiPost("/api/admin/broadcast", body)
       .then(function (res) {
         var n = res && typeof res.sent === "number" ? res.sent : 0;
-        var line = "Sent to " + n + (n === 1 ? " client." : " clients.");
+        var line = "Sent to " + n + (n === 1 ? " client." : " clients.") +
+          (flyer ? " Your flyer went with it." : "");
         $("bc-result").textContent = line;
         $("bc-result").hidden = false;
         toast(line);
@@ -693,7 +1157,7 @@
     tabs.forEach(function (t) {
       t.setAttribute("aria-pressed", String(t.getAttribute("data-view") === v));
     });
-    ["bookings", "calendar", "clients", "broadcast"].forEach(function (name) {
+    ["bookings", "calendar", "hours", "clients", "broadcast"].forEach(function (name) {
       var el = $("view-" + name);
       if (name === v) {
         if (el.hidden) {
@@ -708,6 +1172,10 @@
     });
     if (v === "bookings") { renderBookings(); updateBadge(); }
     if (v === "calendar") { renderCalendar(); renderDayPanel(); }
+    if (v === "hours") {
+      renderHours();
+      if (!state.hoursLoaded) loadHours();
+    }
     if (v === "clients") {
       if (!state.clients.length) {
         api("/api/admin/clients").then(function (res) {
@@ -899,6 +1367,33 @@
       toggleBlock(state.selectedDay);
     });
 
+    // hours and days
+    renderHours();
+    $("hours-rows").addEventListener("click", function (ev) {
+      var t = ev.target.closest ? ev.target.closest("button[data-toggle], button[data-copy]") : null;
+      if (!t) return;
+      if (t.hasAttribute("data-toggle")) toggleHoursDay(t.getAttribute("data-toggle"));
+      else copyHoursFrom(t.getAttribute("data-copy"));
+    });
+    function onHoursTime(ev) {
+      var input = ev.target;
+      if (!input || !input.getAttribute || !input.getAttribute("data-time")) return;
+      var d = draftDay(input.getAttribute("data-weekday"));
+      if (!d) return;
+      d[input.getAttribute("data-time")] = input.value;
+      var row = document.querySelector('.hrow[data-row="' + d.weekday + '"]');
+      if (row) {
+        if (rowEdited(d)) row.classList.add("hrow-edited");
+        else row.classList.remove("hrow-edited");
+      }
+      clearHoursNotices();
+      updateHoursButtons();
+    }
+    $("hours-rows").addEventListener("input", onHoursTime);
+    $("hours-rows").addEventListener("change", onHoursTime);
+    $("hours-save").addEventListener("click", saveHours);
+    $("hours-cancel").addEventListener("click", cancelHours);
+
     // clients
     $("client-search").addEventListener("input", renderClients);
 
@@ -917,11 +1412,32 @@
     });
     $("bc-subject").addEventListener("input", updatePreview);
     $("bc-message").addEventListener("input", updatePreview);
+    $("bc-image").addEventListener("change", function (ev) {
+      var files = ev.target.files;
+      handleFlyerFile(files && files[0]);
+    });
+    $("bc-flyer-remove").addEventListener("click", function () {
+      clearFlyer();
+      $("bc-image").focus();
+      toast("Flyer removed.");
+    });
     $("bc-send").addEventListener("click", function () {
-      if (!$("bc-subject").value.trim() || !$("bc-message").value.trim()) {
-        toast("Add a subject and a message first.");
+      var subject = $("bc-subject").value.trim();
+      var message = $("bc-message").value.trim();
+      if (!subject) {
+        toast("Add a subject so your clients know what it is about.");
+        $("bc-subject").focus();
         return;
       }
+      // A flyer on its own is a real message, so words are not required.
+      if (!message && !state.flyer) {
+        toast("Write a message or add a flyer first.");
+        $("bc-message").focus();
+        return;
+      }
+      $("bc-confirm-line").textContent = state.flyer
+        ? "This goes to every client, with your flyer."
+        : "This goes to every client.";
       $("bc-result").hidden = true;
       $("bc-send").hidden = true;
       $("bc-confirm").hidden = false;

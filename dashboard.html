@@ -247,6 +247,80 @@ button.cal-day:hover{border-color:var(--rose)}
 .day-actions{margin-top:.85rem}
 .day-hint{margin-top:.5rem;font-size:.8rem;color:var(--ink-faint)}
 
+/* ---------- hours ---------- */
+.hours-rows{display:flex;flex-direction:column;gap:.6rem;margin-top:.2rem}
+.hrow{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:var(--shadow-soft);padding:.7rem .9rem;
+  transition:background .2s var(--ease-out), border-color .2s var(--ease-out);
+}
+.hrow-off{background:var(--surface-2);box-shadow:none}
+.hrow-top{display:flex;align-items:center;justify-content:space-between;gap:.6rem}
+.hrow-day{font-weight:900;font-size:1.02rem}
+.hswitch{
+  display:inline-flex;align-items:center;gap:.55rem;
+  font:inherit;font-weight:700;font-size:.85rem;color:var(--ink-faint);
+  background:transparent;border:none;border-radius:var(--r-pill);
+  padding:.3rem .1rem;min-height:44px;cursor:pointer;
+  transition:transform .16s var(--ease-out), color .2s var(--ease-out);
+}
+.hswitch:active{transform:scale(.97)}
+.hswitch:focus-visible:active{transform:none}
+.hswitch-track{
+  position:relative;flex:none;width:2.9rem;height:1.7rem;border-radius:var(--r-pill);
+  background:var(--line-strong);transition:background .2s var(--ease-out);
+}
+.hswitch-thumb{
+  position:absolute;top:.2rem;left:.2rem;width:1.3rem;height:1.3rem;border-radius:50%;
+  background:var(--surface);box-shadow:var(--shadow-soft);
+  transition:transform .2s var(--ease-out);
+}
+.hswitch[aria-pressed="true"]{color:var(--rose-deep)}
+.hswitch[aria-pressed="true"] .hswitch-track{background:var(--rose)}
+.hswitch[aria-pressed="true"] .hswitch-thumb{transform:translateX(1.2rem)}
+.hrow-times{display:flex;gap:.65rem;margin-top:.5rem}
+.hrow-off .hrow-times,.hrow-off .hcopy,.hrow-off:focus-within .hcopy{display:none}
+.htime{flex:1 1 0;display:flex;flex-direction:column;gap:.22rem;min-width:0}
+.field-time{padding:.6rem .7rem;min-height:48px}
+/* The quick-apply link stays out of the way until she is working on a day,
+   so the list reads as seven calm rows instead of seven links. */
+.hcopy{display:none}
+.hrow:focus-within .hcopy,.hrow-edited .hcopy{
+  display:inline-flex;align-items:center;margin-top:.55rem;
+  font:inherit;font-weight:700;font-size:.83rem;color:var(--rose);
+  background:transparent;border:none;cursor:pointer;padding:.5rem 0;min-height:44px;
+  text-decoration:underline;text-underline-offset:2px;
+  transition:color .2s var(--ease-out), transform .16s var(--ease-out);
+}
+.hcopy:hover{color:var(--rose-deep)}
+.hcopy:active{transform:scale(.97)}
+.hcopy:focus-visible:active{transform:none}
+.hours-actions{display:flex;gap:.6rem;margin-top:1.1rem}
+.hours-actions .btn{flex:1}
+.hours-error{
+  margin-top:.9rem;font-size:.9rem;font-weight:700;color:var(--danger);
+  background:oklch(95% 0.02 25);border-radius:.7rem;padding:.6rem .8rem;
+}
+.hours-saved{
+  margin-top:.9rem;font-weight:700;color:var(--success);
+  background:oklch(95% 0.03 155);border-radius:.7rem;padding:.55rem .8rem;font-size:.92rem;
+}
+.affected-box{
+  margin-top:1rem;background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:var(--r-card);box-shadow:var(--shadow-soft);padding:1rem;
+  animation:rise .22s var(--ease-out) both;
+}
+.affected-box h3{font-size:1rem;font-weight:900}
+.affected-note{font-size:.88rem;color:var(--ink-dim);margin-top:.4rem}
+.affected-list{list-style:none;margin-top:.75rem;display:flex;flex-direction:column;gap:.55rem}
+.affected-list li{
+  display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;
+  border-top:1px dashed var(--line);padding-top:.55rem;
+}
+.affected-who{flex:1 1 10rem;min-width:0}
+.affected-who strong{display:block;font-weight:900;font-size:.95rem}
+.affected-who span{display:block;font-size:.85rem;color:var(--ink-dim)}
+
 /* ---------- clients ---------- */
 #client-search{margin-top:.6rem}
 .clients-list{list-style:none;margin-top:.8rem;display:flex;flex-direction:column;gap:.55rem}
@@ -267,13 +341,49 @@ button.cal-day:hover{border-color:var(--rose)}
 .suggest{
   font:inherit;font-weight:700;font-size:.83rem;color:var(--rose-deep);
   background:var(--rose-soft);border:1px solid transparent;border-radius:var(--r-pill);
-  padding:.42rem .9rem;min-height:36px;cursor:pointer;
+  padding:.42rem .9rem;min-height:44px;cursor:pointer;
   transition:border-color .18s var(--ease-out), transform .16s var(--ease-out);
 }
 .suggest:hover{border-color:var(--rose)}
 .suggest:active{transform:scale(.97)}
 .suggest:focus-visible:active{transform:none}
 #broadcast-form{display:flex;flex-direction:column;gap:.65rem}
+.flyer-hint{font-size:.82rem;color:var(--ink-faint);margin:.15rem 0 .5rem}
+.file-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.file-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:.5rem;
+  font-weight:700;font-size:1rem;color:var(--ink);
+  background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-pill);
+  padding:.85rem 1.6rem;min-height:48px;cursor:pointer;
+  transition:border-color .2s var(--ease-out), color .2s var(--ease-out), transform .16s var(--ease-out);
+}
+.file-btn:hover{border-color:var(--rose);color:var(--rose)}
+.file-btn:active{transform:scale(.97)}
+.file-input:focus-visible + .file-btn{outline:2px solid var(--rose);outline-offset:2px}
+.flyer-busy{font-size:.85rem;font-weight:700;color:var(--ink-dim);margin-top:.5rem}
+.flyer-error{
+  margin-top:.5rem;font-size:.88rem;font-weight:700;color:var(--danger);
+  background:oklch(95% 0.02 25);border-radius:.7rem;padding:.5rem .75rem;
+}
+.flyer-preview{
+  display:flex;gap:.8rem;align-items:flex-start;margin-top:.7rem;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:var(--shadow-soft);padding:.7rem .8rem;
+  animation:rise .2s var(--ease-out) both;
+}
+.flyer-thumb{
+  width:5rem;height:5rem;flex:none;object-fit:cover;border-radius:.7rem;
+  border:1px solid var(--line);background:var(--surface-2);
+}
+.flyer-meta{flex:1;min-width:0}
+.flyer-name{font-weight:900;font-size:.9rem;overflow-wrap:anywhere}
+.flyer-size{font-size:.8rem;color:var(--ink-faint);margin-bottom:.5rem}
+.pv-flyer{
+  width:100%;max-height:11rem;object-fit:cover;border-radius:.7rem;
+  border:1px solid var(--line);margin-top:.5rem;
+}
+.sms-flyer{font-size:.86rem;color:var(--ink-dim);margin-top:.35rem}
+.sms-bubble p + p{margin-top:.25rem}
 .previews{display:grid;gap:.8rem;margin:1.1rem 0}
 @media (min-width:560px){.previews{grid-template-columns:1fr 1fr}}
 .preview-card{
@@ -368,9 +478,10 @@ button.cal-day:hover{border-color:var(--rose)}
 .toast.show{opacity:1;transform:translate(-50%, 0)}
 
 @media (prefers-reduced-motion: reduce){
-  .view-in,.login-card,.day-panel,.confirm-box{animation:none}
-  .drawer,.scrim,.toast{transition:none}
-  .btn:active,.tab:active,.pill:active,.suggest:active,.outbox-fab:active{transform:none}
+  .view-in,.login-card,.day-panel,.confirm-box,.affected-box,.flyer-preview{animation:none}
+  .drawer,.scrim,.toast,.hswitch-track,.hswitch-thumb{transition:none}
+  .btn:active,.tab:active,.pill:active,.suggest:active,.outbox-fab:active,
+  .hswitch:active,.hcopy:active,.file-btn:active{transform:none}
 }
 </style>
 </head>
@@ -443,6 +554,7 @@ button.cal-day:hover{border-color:var(--rose)}
     <nav class="tabs" aria-label="Dashboard sections">
       <button class="tab" data-view="bookings" aria-pressed="true">Bookings<span id="attention-badge" class="badge" hidden></span></button>
       <button class="tab" data-view="calendar" aria-pressed="false">Calendar</button>
+      <button class="tab" data-view="hours" aria-pressed="false">Hours</button>
       <button class="tab" data-view="clients" aria-pressed="false">Clients</button>
       <button class="tab" data-view="broadcast" aria-pressed="false">Message everyone</button>
     </nav>
@@ -467,10 +579,23 @@ button.cal-day:hover{border-color:var(--rose)}
       </div>
       <div id="cal-grid" class="cal-grid"></div>
       <p class="cal-legend">
-        <span><span class="swatch swatch-closed"></span>Sundays are closed</span>
+        <span><span class="swatch swatch-closed"></span>Days you are closed</span>
         <span><span class="swatch swatch-blocked"></span>Blocked day</span>
       </p>
       <div id="day-panel" class="day-panel" hidden></div>
+    </section>
+
+    <section id="view-hours" class="view" aria-label="Hours and days" hidden>
+      <h2 class="script-eyebrow">Hours and days</h2>
+      <p class="view-sub">Pick the days you work and the times you start and finish. When you save, your site and your booking times change right away.</p>
+      <div id="hours-rows" class="hours-rows"></div>
+      <p id="hours-error" class="hours-error" role="alert" hidden></p>
+      <div class="hours-actions">
+        <button id="hours-save" class="btn btn-solid" type="button" disabled>Save hours</button>
+        <button id="hours-cancel" class="btn btn-ghost" type="button" disabled>Cancel</button>
+      </div>
+      <p id="hours-saved" class="hours-saved" role="status" hidden></p>
+      <div id="hours-affected"></div>
     </section>
 
     <section id="view-clients" class="view" aria-label="Clients" hidden>
@@ -494,24 +619,46 @@ button.cal-day:hover{border-color:var(--rose)}
           <label class="field-label" for="bc-message">Message</label>
           <textarea id="bc-message" class="field" rows="6" placeholder="Write your message to every client."></textarea>
         </div>
+        <div>
+          <label class="field-label" for="bc-image">Flyer</label>
+          <p class="flyer-hint">Add a picture and it goes out with your message. Clients see it in the email and get a link to it in the text. A flyer on its own is fine, no words needed.</p>
+          <input id="bc-image" class="file-input" type="file" accept="image/jpeg,image/png,image/webp">
+          <label class="file-btn" for="bc-image"><span id="bc-file-label">Add a flyer</span></label>
+          <p id="bc-flyer-busy" class="flyer-busy" role="status" hidden>Getting your flyer ready.</p>
+          <p id="bc-flyer-error" class="flyer-error" role="alert" hidden></p>
+          <div id="bc-flyer-preview" class="flyer-preview" hidden>
+            <img id="bc-flyer-thumb" class="flyer-thumb" alt="The flyer you picked">
+            <div class="flyer-meta">
+              <p id="bc-flyer-name" class="flyer-name"></p>
+              <p id="bc-flyer-size" class="flyer-size"></p>
+              <button id="bc-flyer-remove" class="btn btn-ghost btn-sm" type="button">Remove flyer</button>
+            </div>
+          </div>
+        </div>
       </form>
       <div class="previews">
         <figure class="preview-card">
           <figcaption>Email preview</figcaption>
           <p class="email-meta">To: every client</p>
           <p class="email-subject" id="pv-email-subject">Your subject will show here.</p>
+          <img id="pv-email-flyer" class="pv-flyer" alt="Your flyer, the way clients see it in the email" hidden>
           <p class="email-body" id="pv-email-body">Your message will show here.</p>
         </figure>
         <figure class="preview-card">
           <figcaption>Text preview</figcaption>
-          <div class="sms-shell"><p class="sms-bubble" id="pv-sms-body">Your message will show here.</p></div>
+          <div class="sms-shell">
+            <div class="sms-bubble">
+              <p id="pv-sms-body">Your message will show here.</p>
+              <p id="pv-sms-flyer" class="sms-flyer" hidden>Flyer: a link to your picture goes here</p>
+            </div>
+          </div>
           <p class="sms-count" id="pv-sms-count" hidden></p>
         </figure>
       </div>
       <div class="send-area">
         <button id="bc-send" class="btn btn-solid btn-wide" type="button">Send to every client</button>
         <div id="bc-confirm" class="confirm-box" hidden>
-          <p>This goes to every client.</p>
+          <p id="bc-confirm-line">This goes to every client.</p>
           <div class="row">
             <button id="bc-send-yes" class="btn btn-solid" type="button">Yes, send it</button>
             <button id="bc-send-no" class="btn btn-ghost" type="button">Go back</button>

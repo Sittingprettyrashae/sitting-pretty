@@ -521,7 +521,7 @@ dialog[open] .sheet{transform:translateY(0)}
       <div class="services-intro" id="servicesIntro">
         <h2><span class="kicker">No surprises at the register</span>Every service, priced upfront.</h2>
         <p>Over a hundred services, organized so you can find yours fast. Tap a category, pick your style, choose your day and time, and pay your deposit right here.</p>
-        <div class="note"><strong>Deposits hold your seat.</strong> A deposit is required for every appointment and comes off your balance the day of your service. Most styles take their deposit securely online when you book; for the rest, Ebony texts you to confirm the deposit amount before your appointment is held.</div>
+        <div class="note"><strong>Your deposit books your spot.</strong> Pay it securely when you book and the time is yours; it comes off your balance the day of your service. A few styles are priced by your hair, and for those Ebony texts you to confirm the deposit before your time is held.</div>
       </div>
       <div class="acc" id="servicesAcc"><noscript><p style="padding:1.2rem 0">Turn on JavaScript to book online, or text <a href="sms:+18177048300" style="color:var(--rose)">(817) 704-8300</a> and Ebony will get you on the books.</p></noscript></div>
     </div>
@@ -552,7 +552,7 @@ dialog[open] .sheet{transform:translateY(0)}
     <div class="policy-wrap">
       <h2 class="rv" style="text-align:center"><span class="kicker">Before you book</span>House rules, so we both sit pretty.</h2>
       <div class="policy-list">
-        <div class="policy rv"><span class="n">1</span><div><h3>Deposits are due within 24 hours</h3><p>A deposit secures every appointment and comes off your balance the day of your service. Unpaid after 24 hours, the appointment is cancelled.</p></div></div>
+        <div class="policy rv"><span class="n">1</span><div><h3>Your deposit books your spot</h3><p>The time is yours once the deposit is paid, not before, so nobody can take it out from under you. It comes off your balance the day of your service. A few styles are priced by your hair, and Ebony confirms the deposit for those by text.</p></div></div>
         <div class="policy rv"><span class="n">2</span><div><h3>15-minute grace period</h3><p>After 15 minutes the appointment is cancelled, and a $25 rescheduling fee applies before you can book again.</p></div></div>
         <div class="policy rv"><span class="n">3</span><div><h3>Bring your hair on time</h3><p>Wigs, closures, frontals, and bundles need to arrive in the time frame you discuss with Ebony so she can customize them. Otherwise the appointment is rescheduled, or a $25 same-day customization fee applies.</p></div></div>
         <div class="policy rv"><span class="n">4</span><div><h3>Feeling sick? Reschedule</h3><p>If you have a cough or aren&rsquo;t feeling well, please move your appointment. Everybody&rsquo;s health matters in a one-on-one studio.</p></div></div>
@@ -565,15 +565,19 @@ dialog[open] .sheet{transform:translateY(0)}
   <section>
     <div class="wrap hours-grid">
       <div>
-        <h2 class="rv"><span class="kicker">When the chair is open</span>Six days a week.</h2>
-        <div class="hours-table rv">
-          <div class="hrow closed"><span class="d">Sunday</span><span class="t">Closed</span></div>
-          <div class="hrow"><span class="d">Monday</span><span class="t">9:00 AM &ndash; 8:00 PM</span></div>
-          <div class="hrow"><span class="d">Tuesday</span><span class="t">9:00 AM &ndash; 8:00 PM</span></div>
-          <div class="hrow"><span class="d">Wednesday</span><span class="t">9:00 AM &ndash; 8:00 PM</span></div>
-          <div class="hrow"><span class="d">Thursday</span><span class="t">9:00 AM &ndash; 8:00 PM</span></div>
-          <div class="hrow"><span class="d">Friday</span><span class="t">9:00 AM &ndash; 8:00 PM</span></div>
-          <div class="hrow"><span class="d">Saturday</span><span class="t">9:00 AM &ndash; 6:00 PM</span></div>
+        <h2 class="rv"><span class="kicker">When the chair is open</span><span id="hoursHeadline">Six days a week.</span></h2>
+        <!-- Ebony's hours live in her dashboard, never in this file. What is
+             written below is the same record's default, so the page reads
+             right with no JavaScript and before the real hours arrive; then
+             js/booking.js swaps in whatever she has actually set. -->
+        <div class="hours-table rv" id="hoursTable">
+          <div class="hrow closed" data-weekday="0"><span class="d">Sunday</span><span class="t">Closed</span></div>
+          <div class="hrow" data-weekday="1"><span class="d">Monday</span><span class="t">9:00 AM to 8:00 PM</span></div>
+          <div class="hrow" data-weekday="2"><span class="d">Tuesday</span><span class="t">9:00 AM to 8:00 PM</span></div>
+          <div class="hrow" data-weekday="3"><span class="d">Wednesday</span><span class="t">9:00 AM to 8:00 PM</span></div>
+          <div class="hrow" data-weekday="4"><span class="d">Thursday</span><span class="t">9:00 AM to 8:00 PM</span></div>
+          <div class="hrow" data-weekday="5"><span class="d">Friday</span><span class="t">9:00 AM to 8:00 PM</span></div>
+          <div class="hrow" data-weekday="6"><span class="d">Saturday</span><span class="t">9:00 AM to 6:00 PM</span></div>
         </div>
       </div>
       <div class="loc-card rv">
