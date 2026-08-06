@@ -406,6 +406,8 @@ button.cal-day:hover{border-color:var(--rose)}
   padding:.6rem .85rem;font-size:.9rem;color:var(--ink);max-width:100%;overflow-wrap:anywhere;
 }
 .sms-count{font-size:.75rem;color:var(--ink-faint);margin-top:.45rem}
+.sms-off{font-size:.75rem;color:var(--ink-dim);margin-top:.5rem;padding:.45rem .6rem;
+  background:var(--surface-2);border-radius:.6rem;line-height:1.45}
 .send-area{margin-top:.4rem}
 .confirm-box{
   background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-card);
@@ -624,7 +626,7 @@ button.cal-day:hover{border-color:var(--rose)}
         </div>
         <div>
           <label class="field-label" for="bc-image">Flyer</label>
-          <p class="flyer-hint">Add a picture and it goes out with your message. Clients see it in the email and get a link to it in the text. A flyer on its own is fine, no words needed.</p>
+          <p class="flyer-hint">Add a picture and it goes out with your message. Clients see it right in the email. You still need a subject line, but the flyer can do the talking, so the message box can stay empty.</p>
           <input id="bc-image" class="file-input" type="file" accept="image/jpeg,image/png,image/webp">
           <label class="file-btn" for="bc-image"><span id="bc-file-label">Add a flyer</span></label>
           <p id="bc-flyer-busy" class="flyer-busy" role="status" hidden>Getting your flyer ready.</p>
@@ -656,6 +658,9 @@ button.cal-day:hover{border-color:var(--rose)}
             </div>
           </div>
           <p class="sms-count" id="pv-sms-count" hidden></p>
+          <!-- Texting is off until an SMS number is set up, so this pane is a
+               preview of what would go out, not something clients receive. -->
+          <p class="sms-off" id="pv-sms-off">Texting is not switched on yet, so right now your clients get the email only. This is what the text would say once it is.</p>
         </figure>
       </div>
       <div class="send-area">
