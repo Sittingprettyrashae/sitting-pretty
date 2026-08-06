@@ -8,17 +8,35 @@ Everything below is set up so the site, the money, and the client list belong to
 - Her own booking site: clients pick the style, the day, and the time, pay the
   deposit, and get a confirmation. No StyleSeat, no marketplace, no one else's
   branding, nobody taking a cut of her deposits.
-- A dashboard on her phone: every booking, confirm or cancel, block days she is
-  out, see her whole client list, and send one message to every client at once
-  (sick day, holiday hours, a promo).
-- Automatic messages: booking confirmations, cancellations, and deposit reminders.
+- A dashboard on her phone with everything she needs to run the chair:
+  - **Bookings.** Confirm, cancel, mark someone paid in person, see what is
+    still owed on each one.
+  - **Her hours.** She sets her own days and times whenever she likes, and the
+    booking calendar and the hours on her website follow immediately. Changing
+    her hours never cancels an appointment already on the books; it shows her
+    which ones now sit outside her new hours and lets her decide.
+  - **Calendar.** Block a day she is taking off so nobody can book it.
+  - **Clients.** Her whole list, searchable, with phone numbers.
+  - **Message everyone.** One message to every client for a sick day, holiday
+    hours, or a promo, and she can **attach a flyer** straight from her phone
+    for anything she is marketing.
+- She hears about every booking. A new paid booking, a request waiting on her
+  yes, a cancellation, a balance paid online, and an appointment dropped for an
+  unpaid deposit all reach her with the client's name and number, so she never
+  has to go looking in the dashboard to find out something happened.
+- Her clients get automatic messages too: confirmations, cancellations, and
+  receipts when they pay.
 
 ## How the money works
 
-The deposit is what holds the time. The moment it clears, that slot is gone from
-the site and nobody else can take it. No deposit, no hold: unpaid appointments
-are cancelled automatically after 24 hours, which is her existing rule, now
-enforced by the site instead of by her chasing people.
+The deposit is what books the spot, exactly the way she asked for it. No money,
+no appointment: nothing goes on her calendar until the deposit clears. While a
+client is paying, that time is held for fifteen minutes so nobody can take it
+out from under her, and if she walks away from checkout the slot is free again
+within minutes.
+
+That is stricter than her old StyleSeat rule, where someone could book and then
+have a day to pay. Nobody can tie up a Saturday without paying for it now.
 
 The rest of the price is hers to collect however she likes:
 
@@ -69,9 +87,11 @@ accounts.
 3. **Is she a licensed cosmetologist?** The word "licensed" is off the site until
    she confirms, because that is a credential claim.
 4. **Her Instagram handle**, to link from the site.
-5. **Yes or no on text messages.** Email confirmations are free and ready. Adding
-   real SMS costs about $1.15 a month for a phone number plus roughly a penny per
-   text. Her clients are phone people, so this is probably worth it.
+5. **Yes or no on text messages.** Everything is written and ready to text, but
+   until a number is set up it all goes out by email only. That includes the
+   alerts about her own bookings. Adding real texting costs about $1.15 a month
+   for the number plus roughly a penny per message. Her clients are phone
+   people and so is she, so this is probably worth it.
 
 ## What she should look at first
 
