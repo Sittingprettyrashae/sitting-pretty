@@ -172,6 +172,225 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- holds: a slot reserved for a few minutes while a client pays her deposit.
+--
+-- THE DEPOSIT IS WHAT BOOKS THE SPOT. No money, no appointment.
+--
+-- A service with a published deposit does NOT create a booking when someone
+-- picks a time. It creates a hold: the slot is reserved for HOLD_MINUTES (15,
+-- API.md) while she completes Stripe Checkout, nobody else can take it in the
+-- meantime, and it becomes a real appointment only when the deposit clears
+-- (sp_book_hold below). If she walks away from checkout the hold expires and
+-- the time is free again within minutes, instead of an unpaid appointment
+-- sitting on a Saturday for a whole day.
+--
+-- Shape mirrors the `hold` object in API.md. Client fields are NOT snapshotted
+-- here the way they are on bookings: a hold lives for minutes, and the booking
+-- it turns into takes its snapshot then.
+-- ---------------------------------------------------------------------------
+create table if not exists public.holds (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.clients (id)
+    on update cascade on delete cascade,
+  service_id text not null,
+  service_name text not null,
+  price text not null,
+  deposit_cents integer not null check (deposit_cents > 0),
+  date date not null,
+  time text not null check (time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+  duration_min integer not null check (duration_min > 0),
+  notes text not null default '',
+  stripe_session_id text,
+  created_at timestamptz not null default now(),
+  -- Defaulted so a row can never land without an expiry, whatever inserts it.
+  -- The API sets it explicitly from HOLD_MINUTES.
+  expires_at timestamptz not null default (now() + interval '15 minutes'),
+  -- A hold blocks the slot exactly like a booking does, so an unlimited
+  -- refresh would let one person squat a Saturday for free. The contract
+  -- allows one extension while she is still on the checkout page.
+  refresh_count integer not null default 0
+);
+
+-- holds_overlap: two people cannot hold the same time.
+--
+-- No `where expires_at > now()` clause: an index predicate has to be
+-- IMMUTABLE and now() is not. So this covers every row, and expired rows are
+-- removed before a new claim is checked (sp_slot_guard below, plus the sweeps
+-- in the edge function and the pg_cron job in RUNBOOK step 6).
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'holds_overlap') then
+    alter table public.holds add constraint holds_overlap
+      exclude using gist (
+        date with =,
+        (int4range(
+          split_part("time", ':', 1)::int * 60 + split_part("time", ':', 2)::int,
+          split_part("time", ':', 1)::int * 60 + split_part("time", ':', 2)::int + duration_min
+        )) with &&
+      );
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- sp_slot_guard: the cross-table half of "one client at a time".
+--
+-- bookings_overlap stops two BOOKINGS colliding and holds_overlap stops two
+-- HOLDS colliding, but an EXCLUDE constraint cannot span two tables, and a
+-- hold must block a booking exactly as hard as another booking does. This
+-- trigger is that guarantee. It runs on both tables and, in this order:
+--
+--  1. takes a transaction advisory lock keyed on the calendar date. Without
+--     it, two concurrent transactions could each look at the other table, see
+--     nothing (the other row is not committed yet), and both commit. The lock
+--     serializes claims per DAY, so it costs nothing in a one-chair salon.
+--  2. deletes holds on that date that have already run out, so an abandoned
+--     checkout can never keep a slot locked.
+--  3. rejects the row when it overlaps a live claim in the OTHER table,
+--     raising SQLSTATE 23P01 (exclusion_violation) exactly like the two
+--     EXCLUDE constraints, so the edge function's existing "that time was
+--     just taken" 409 covers this case with no extra branch.
+-- ---------------------------------------------------------------------------
+create or replace function public.sp_slot_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  new_start int;
+  new_end int;
+begin
+  perform pg_advisory_xact_lock(hashtext('sitting-pretty-slot:' || new.date::text));
+
+  -- Same date only: the advisory lock above already covers this date, so two
+  -- sweeps can never fight over the same rows in a different order.
+  delete from public.holds as expired
+   where expired.date = new.date and expired.expires_at <= now();
+
+  new_start := split_part(new.time, ':', 1)::int * 60 + split_part(new.time, ':', 2)::int;
+  new_end := new_start + new.duration_min;
+
+  if tg_table_name = 'holds' then
+    perform 1
+       from public.bookings b
+      where b.date = new.date
+        and b.status <> 'canceled'
+        and new_start < split_part(b.time, ':', 1)::int * 60
+                        + split_part(b.time, ':', 2)::int + b.duration_min
+        and split_part(b.time, ':', 1)::int * 60
+            + split_part(b.time, ':', 2)::int < new_end
+      limit 1;
+    if found then
+      raise exception 'that time is already booked'
+        using errcode = 'exclusion_violation';
+    end if;
+  else
+    perform 1
+       from public.holds h
+      where h.date = new.date
+        and h.expires_at > now()
+        and new_start < split_part(h.time, ':', 1)::int * 60
+                        + split_part(h.time, ':', 2)::int + h.duration_min
+        and split_part(h.time, ':', 1)::int * 60
+            + split_part(h.time, ':', 2)::int < new_end
+      limit 1;
+    if found then
+      raise exception 'that time is being held by someone paying for it'
+        using errcode = 'exclusion_violation';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists holds_slot_guard on public.holds;
+create trigger holds_slot_guard
+  before insert on public.holds
+  for each row execute function public.sp_slot_guard();
+
+-- Only fires when a booking actually claims time: a new row, a move, or a
+-- status change back into the calendar. Recording a payment does not re-check
+-- anything. A canceled row claims nothing, so it is skipped.
+drop trigger if exists bookings_slot_guard on public.bookings;
+create trigger bookings_slot_guard
+  before insert or update of "date", "time", duration_min, status on public.bookings
+  for each row
+  when (new.status <> 'canceled')
+  execute function public.sp_slot_guard();
+
+-- ---------------------------------------------------------------------------
+-- sp_book_hold: the deposit landed, so this time is really hers now.
+--
+-- Deleting the hold and inserting the appointment happen in ONE transaction,
+-- which matters twice over: the new booking never collides with the hold it
+-- came from, and no third party can slip into the slot in between.
+--
+-- Returns null when the hold is gone or has already run out. The caller
+-- (functions/api/stripe-webhook.ts) treats that as money that landed on
+-- nothing: no appointment is invented, and Ebony is told to refund it.
+--
+-- p_paid_in_full comes from the caller so the price rules live in exactly one
+-- place (_shared/money.ts), the same place the rest of the money model lives.
+-- ---------------------------------------------------------------------------
+create or replace function public.sp_book_hold(
+  p_hold_id uuid,
+  p_session_id text,
+  p_amount_cents integer,
+  p_paid_in_full boolean
+)
+returns public.bookings
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  d date;
+  h public.holds%rowtype;
+  c public.clients%rowtype;
+  b public.bookings%rowtype;
+begin
+  -- Take the day's slot lock before touching anything, the same lock and the
+  -- same order sp_slot_guard uses, so a booking being created here and a hold
+  -- being created elsewhere can never wait on each other.
+  select holds.date into d from public.holds where holds.id = p_hold_id;
+  if not found then
+    return null;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('sitting-pretty-slot:' || d::text));
+
+  -- Only a hold that is still alive becomes an appointment. One that ran out
+  -- is left where it is for the caller to treat as money needing a refund.
+  delete from public.holds
+   where id = p_hold_id
+     and expires_at > now()
+  returning * into h;
+  if not found then
+    return null;
+  end if;
+
+  select * into c from public.clients where id = h.client_id;
+
+  insert into public.bookings (
+    client_id, client_name, client_email, client_phone,
+    service_id, service_name, price, deposit_cents,
+    date, time, duration_min, status, notes,
+    stripe_session_id, deposit_paid_at, paid_cents, paid_in_full, created_at
+  ) values (
+    h.client_id, c.name, c.email, c.phone,
+    h.service_id, h.service_name, h.price, h.deposit_cents,
+    h.date, h.time, h.duration_min, 'confirmed', h.notes,
+    coalesce(p_session_id, h.stripe_session_id), now(),
+    coalesce(p_amount_cents, h.deposit_cents), coalesce(p_paid_in_full, false),
+    h.created_at
+  )
+  returning * into b;
+
+  return b;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- blocked_days: whole days Ebony closes from the dashboard (sick, holiday).
 -- ---------------------------------------------------------------------------
 create table if not exists public.blocked_days (
@@ -332,6 +551,18 @@ begin
   end if;
   if not exists (select 1 from pg_constraint where conname = 'bookings_client_id_fkey') then
     alter table public.bookings add constraint bookings_client_id_fkey
+      foreign key (client_id) references public.clients (id)
+      on update cascade on delete cascade;
+  end if;
+
+  if exists (
+    select 1 from pg_constraint
+     where conname = 'holds_client_id_fkey' and confupdtype <> 'c'
+  ) then
+    alter table public.holds drop constraint holds_client_id_fkey;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'holds_client_id_fkey') then
+    alter table public.holds add constraint holds_client_id_fkey
       foreign key (client_id) references public.clients (id)
       on update cascade on delete cascade;
   end if;
@@ -520,6 +751,14 @@ create index if not exists bookings_date_status_idx on public.bookings (date, st
 create index if not exists bookings_client_created_idx on public.bookings (client_id, created_at desc);
 create index if not exists bookings_stripe_session_idx on public.bookings (stripe_session_id);
 create index if not exists bookings_balance_session_idx on public.bookings (balance_session_id);
+-- Added after holds shipped: an existing table needs the column too.
+alter table public.holds
+  add column if not exists refresh_count integer not null default 0;
+
+create index if not exists holds_date_idx on public.holds (date);
+create index if not exists holds_expires_idx on public.holds (expires_at);
+create index if not exists holds_client_idx on public.holds (client_id, created_at desc);
+create index if not exists holds_stripe_session_idx on public.holds (stripe_session_id);
 create index if not exists notifications_log_booking_idx on public.notifications_log (booking_id);
 create index if not exists notifications_log_created_idx on public.notifications_log (created_at desc);
 
@@ -533,7 +772,14 @@ create index if not exists notifications_log_created_idx on public.notifications
 -- ---------------------------------------------------------------------------
 revoke all on function public.sp_sync_client(uuid) from public, anon, authenticated;
 revoke all on function public.handle_auth_user_change() from public, anon, authenticated;
+revoke all on function public.sp_slot_guard() from public, anon, authenticated;
+revoke all on function public.sp_book_hold(uuid, text, integer, boolean)
+  from public, anon, authenticated;
 grant execute on function public.sp_sync_client(uuid) to service_role;
+-- Turning a paid hold into an appointment is a service-role move only: it is
+-- called by the Stripe webhook after the signature verifies, never by a
+-- browser.
+grant execute on function public.sp_book_hold(uuid, text, integer, boolean) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
@@ -556,6 +802,7 @@ grant execute on function public.sp_sync_client(uuid) to service_role;
 -- ---------------------------------------------------------------------------
 alter table public.clients enable row level security;
 alter table public.bookings enable row level security;
+alter table public.holds enable row level security;
 alter table public.blocked_days enable row level security;
 alter table public.broadcasts enable row level security;
 alter table public.notifications_log enable row level security;
@@ -567,6 +814,14 @@ create policy clients_select_own on public.clients
 
 drop policy if exists bookings_select_own on public.bookings;
 create policy bookings_select_own on public.bookings
+  for select to authenticated using ((select auth.uid()) = client_id);
+
+-- A client can see the time she is holding right now, and nobody else's. No
+-- insert, update, or delete policy: holds are created, extended, and cleared
+-- by the edge functions with the service role key, so a browser can never
+-- reserve a Saturday for itself or push its own expiry out.
+drop policy if exists holds_select_own on public.holds;
+create policy holds_select_own on public.holds
   for select to authenticated using ((select auth.uid()) = client_id);
 
 drop policy if exists hours_public_read on public.hours;

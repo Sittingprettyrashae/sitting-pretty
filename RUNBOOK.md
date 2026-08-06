@@ -431,6 +431,24 @@ Notes:
   `notifications_log` with status `logged`, and email still sends. Nothing
   breaks by skipping Twilio.
 
+- Optional, all with sensible defaults:
+
+  ```sh
+  supabase secrets set \
+    HOLD_MINUTES=15 \
+    OWNER_EMAIL=REPLACE-WITH-HER-ADDRESS \
+    OWNER_PHONE=+1REPLACE
+  ```
+
+  - `HOLD_MINUTES` is how long a slot stays reserved while a client is on the
+    Stripe page. Default 15, which is the number API.md states and the number
+    the booking sheet tells her.
+  - `OWNER_EMAIL` / `OWNER_PHONE` are where owner alerts go ("What Ebony is
+    told" in API.md). Leave them unset and the alerts go to the admin account
+    instead, the row you granted `is_admin` in step 2. Set them when you want
+    her alerts somewhere other than her sign-in address. Owner alerts are
+    never sent to a client.
+
 Redeploy after any code change with the same deploy command. Logs:
 `supabase functions logs api` or the dashboard's Edge Functions > api > Logs.
 
@@ -524,12 +542,16 @@ When switching to live mode later, repeat this in live mode: live webhooks
 have a different `whsec_`, and `STRIPE_SECRET_KEY` must be swapped to
 `sk_live_...` at the same time.
 
-Safety behavior baked into the webhook handler: a booking is only confirmed
-when the session's `payment_status` is `paid` AND `amount_total` equals the
-booking's `deposit_cents`. Anything else (unsettled payment, wrong amount,
-unknown booking, replayed event) is acknowledged and logged without
-confirming; check `supabase functions logs api` if a paid booking ever seems
-stuck in `awaiting_deposit`.
+Safety behavior baked into the webhook handler. The webhook is the ONLY
+place a deposit turns a held slot into an appointment, and it does so only
+when the session's `payment_status` is `paid`, `amount_total` equals the
+deposit that was quoted, and the hold has not run out. Anything else
+(unsettled payment, wrong amount, unknown session, replayed event) is
+acknowledged and logged, and nothing is created or changed. Money that lands
+on an appointment that is not taking any, or on a hold that already expired,
+raises a refund alert to Ebony instead of quietly booking something; check
+`supabase functions logs api` if a paid deposit ever seems to have produced
+no booking.
 
 ## 5) Frontend config: swap demo API for production
 
@@ -600,42 +622,63 @@ Everything else already works unchanged: every other request goes to
 `apiBase` + the same path with the bearer token. The anon public key is safe
 to publish; data is protected by RLS plus the in-function auth checks.
 
-## 6) Schedule the 24-hour unpaid-deposit cleanup
+## 6) Schedule the expired-hold cleanup
 
-Her policy: deposits are due within 24 hours of booking or the appointment
-is canceled. Nothing in production cancels stale `awaiting_deposit` rows by
-itself, so schedule it in Postgres with pg_cron:
+The deposit is what books the spot. A service with a published deposit does
+not put an appointment on her calendar: it puts a **hold** on the slot for 15
+minutes while the client pays (API.md, POST /api/bookings). Nobody else can
+take that time in the meantime, and the appointment appears only when the
+money clears. An abandoned checkout has to give the time back.
+
+Three things already do that, so a slot is never stuck:
+
+- availability only ever counts holds that have not run out yet, so an
+  expired hold stops blocking the time the moment it expires;
+- the `sp_slot_guard` trigger clears that day's expired holds before any new
+  claim is checked, so the `holds_overlap` constraint can never refuse a slot
+  that is really free;
+- the edge function sweeps expired holds before every availability, `/me`,
+  booking, and dashboard read.
+
+This job is the housekeeping layer on top: it keeps the table from carrying
+rows nobody will ever look at again, including on days with no traffic.
 
 1. Dashboard > Database > Extensions: enable `pg_cron`.
 2. SQL Editor, run once:
 
    ```sql
    select cron.schedule(
-     'cancel-unpaid-deposits',   -- job name, visible in cron.job
-     '*/30 * * * *',             -- every 30 minutes
-     $$
-     update public.bookings
-        set status = 'canceled', canceled_by = 'admin'
-      where status = 'awaiting_deposit'
-        and created_at < now() - interval '24 hours';
-     $$
+     'clear-expired-holds',      -- job name, visible in cron.job
+     '*/5 * * * *',              -- every 5 minutes
+     $$ delete from public.holds where expires_at <= now(); $$
    );
    ```
 
 3. Verify: `select * from cron.job;` lists the job; after a run,
    `select * from cron.job_run_details order by start_time desc limit 5;`
    shows results. To remove it:
-   `select cron.unschedule('cancel-unpaid-deposits');`.
+   `select cron.unschedule('clear-expired-holds');`.
 
-Notes:
+### The old 24-hour unpaid-deposit job
 
-- This SQL path does not send a cancellation email (notifications are sent
-  by the edge function). That is fine: the deposit email already tells the
-  client the appointment is canceled if the deposit is not paid within 24
-  hours. When Ebony cancels manually from the dashboard instead, the client
-  does get the notice.
-- The freed slot reopens automatically: availability ignores canceled rows,
-  and the `bookings_overlap` constraint only applies to non-canceled rows.
+Earlier versions of this runbook scheduled a second job that canceled stale
+`awaiting_deposit` bookings in SQL. Do not add it, and remove it if it is
+still there:
+
+```sql
+select cron.unschedule('cancel-unpaid-deposits');
+```
+
+Two reasons. Under the hold model nothing new ever reaches
+`awaiting_deposit`, because no appointment is created before the deposit is
+paid. And the SQL job could not send a message, so an appointment came off
+the calendar without the client or Ebony being told. The edge function now
+does that sweep instead (`_shared/deposits.ts`): it runs before every
+availability, `/me`, booking, and dashboard read, cancels anything left
+unpaid past 24 hours, tells the client why, and tells Ebony the slot
+reopened. If she still had unpaid bookings on the books from before the hold
+model, the first page load after deploying clears them and sends both
+notices.
 
 ## 7) GitHub Pages + custom domain + Cloudflare DNS
 
@@ -719,20 +762,32 @@ account.
       `redirect_uri_mismatch` here means the authorized redirect URI in
       Google does not match the Supabase callback URL exactly (step 2b.4).
 - [ ] Book a deposit service (for example Traditional Sew In, $50 deposit):
-      Stripe Checkout opens for exactly $50, pay with 4242. Booking flips to
-      `confirmed`, confirmation email arrives, dashboard shows it.
-- [ ] Decline card: booking stays `awaiting_deposit` and the "almost booked"
-      email contains the checkout link.
+      no booking row is created yet. A row appears in `public.holds` with an
+      `expires_at` about 15 minutes out, Stripe Checkout opens for exactly
+      $50, and paying with 4242 creates the booking as `confirmed`, deletes
+      the hold, sends the client her confirmation, and sends Ebony the
+      new-booking alert. The dashboard shows it.
+- [ ] Decline the card, or just close the Stripe tab: still no booking, and
+      the slot is offered again as soon as the hold runs out. Nothing is
+      emailed, because nothing was promised.
+- [ ] Hold blocks the slot: with a hold live, load availability for that time
+      in another browser. The slot is gone. When the hold expires it comes
+      back.
 - [ ] Book a no-deposit service (for example 2-Part Sew In): no payment step,
-      status `request`, request email arrives.
+      status `request`, request email to the client AND the "needs your yes"
+      alert to Ebony.
 - [ ] Overlap guard: try booking a time overlapping an existing booking; the
       slot is gone, and forcing it returns the "just taken" error. (Even two
-      simultaneous submissions cannot both land: the `bookings_overlap`
-      database constraint rejects the second insert and the API returns the
-      same 409.)
-- [ ] Cleanup job (step 6): leave a deposit booking unpaid; after 24 hours
-      it flips to `canceled` and the slot reopens. To test faster,
-      temporarily schedule the job with a shorter interval, then restore.
+      simultaneous submissions cannot both land: `bookings_overlap`,
+      `holds_overlap` and the `sp_slot_guard` trigger reject the second write
+      and the API returns the same 409. A hold blocks a booking and a booking
+      blocks a hold.)
+- [ ] Expired hold that gets paid anyway: shorten `HOLD_MINUTES` to 1,
+      start a checkout, wait it out, then pay. NO booking is created, and
+      Ebony gets the "refund needed" alert naming the client. Restore
+      `HOLD_MINUTES` afterwards.
+- [ ] Cleanup job (step 6): after a hold expires, `public.holds` empties out
+      within a few minutes even with nobody using the site.
 - [ ] Sunday shows closed. On a Saturday, the last offered start time equals
       18:00 minus the service duration.
 - [ ] Hours (step 3b): from the dashboard, close a day she normally works and
@@ -748,7 +803,14 @@ account.
       `image_url`.
 - [ ] Flyer limits: a file over 5 MB and a non-image file are both refused
       with one plain message, and NOBODY receives a message.
-- [ ] Cancel from My bookings: status `canceled`, cancellation email arrives.
+- [ ] Cancel from My bookings: status `canceled`, cancellation email arrives,
+      and Ebony gets the client-cancellation alert saying the slot reopened.
+- [ ] Pay a balance online from My bookings: the client gets the paid-in-full
+      email and Ebony gets the "nothing to collect" alert.
+- [ ] Owner alerts never reach a client: every row in `notifications_log`
+      whose `event` starts with `owner_` (plus `payment_needs_refund` and
+      `hold_expired_refund`) has HER address in `recipient`, never a
+      client's.
 - [ ] Admin: sign in with the admin email, dashboard lists all bookings.
 - [ ] Admin blocks a day: it vanishes from the date picker; unblock restores
       it.
@@ -845,7 +907,7 @@ steps 3 and 4 keep working unchanged.
 - [ ] Stripe webhook endpoint URL still points at the Supabase project URL
       and the live `whsec_` is set.
 - [ ] `js/config.js` still points at the right project ref.
-- [ ] The pg_cron cleanup job (step 6) still shows in `cron.job`.
+- [ ] The pg_cron hold cleanup job (step 6) still shows in `cron.job`.
 - [ ] One end-to-end booking with the cheapest deposit service, refunded
       from her Stripe dashboard afterward.
 - [ ] She has two-factor auth on GitHub, Supabase, Stripe, Cloudflare, and

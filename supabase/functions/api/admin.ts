@@ -182,7 +182,15 @@ async function setBookingStatus(req: Request, bookingId: string): Promise<Respon
     .eq("id", bookingId)
     .select("*")
     .single();
-  if (updated.error) throw new HttpError(500, "Could not update the booking");
+  if (updated.error) {
+    // 23P01: putting this one back on the calendar would double-book the time,
+    // because another appointment or a live hold now sits there. Say so
+    // plainly instead of a blank failure.
+    if ((updated.error as { code?: string }).code === "23P01") {
+      throw new HttpError(409, "Someone else has that time now. Pick a new time for this one.");
+    }
+    throw new HttpError(500, "Could not update the booking");
+  }
 
   if (status === "canceled") await notifyBookingCanceled(updated.data, "admin");
   // Admin confirm counts as the "confirmed" event (ARCHITECTURE.md), same
@@ -224,6 +232,8 @@ async function listClients(): Promise<Response> {
   const clientsRes = await db
     .from("clients")
     .select("id, email, name, phone")
+    // Her own account is not one of her clients.
+    .eq("is_admin", false)
     .order("created_at", { ascending: true });
   if (clientsRes.error) throw new HttpError(500, "Could not load clients");
   const bookingsRes = await db.from("bookings").select("client_id, date");
@@ -268,7 +278,7 @@ async function broadcast(req: Request): Promise<Response> {
   const imageUrl = image ? await storeFlyer(image) : null;
 
   const db = adminDb();
-  const clientsRes = await db.from("clients").select("id, email, name, phone");
+  const clientsRes = await db.from("clients").select("id, email, name, phone").eq("is_admin", false);
   if (clientsRes.error) throw new HttpError(500, "Could not load clients");
 
   let sent = 0;

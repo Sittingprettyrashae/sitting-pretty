@@ -4,15 +4,17 @@
 // server/templates.mjs. The two files are worded for their own contexts and
 // are not word-for-word identical, but the POLICY MEANING must always agree:
 // a deposit is always required (some services just do not publish the
-// amount, so Ebony confirms that deposit by text), deposits are due within
-// 24 hours of booking or the appointment is canceled, a paid deposit means
-// the time is HELD, the rest can be brought to the appointment or paid
+// amount, so Ebony confirms that deposit by text), THE DEPOSIT IS WHAT BOOKS
+// THE SPOT so an appointment only exists once it is paid, a paid deposit
+// means the time is HELD, the rest can be brought to the appointment or paid
 // online first, a price carrying a plus ("$50+") is settled in person
 // because the final amount depends on the client's hair, and a paid-in-full
-// service owes nothing at the appointment. If you change policy language
-// here, update server/templates.mjs in the same commit. Policy lines come
-// from Ke'Ebonie's own StyleSeat policies (styleseat-reference.md). Never
-// invent new policy or pricing language.
+// service owes nothing at the appointment. The 24-hour deposit deadline still
+// appears in one place, the cancellation notice for appointments booked
+// before the hold model existed (_shared/deposits.ts). If you change policy
+// language here, update server/templates.mjs in the same commit. Policy lines
+// come from Ke'Ebonie's own StyleSeat policies (styleseat-reference.md).
+// Never invent new policy or pricing language.
 //
 // Delivery: email via Resend REST when RESEND_API_KEY is set, SMS via
 // Twilio REST when TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN /
@@ -39,6 +41,9 @@ export interface BookingLike {
   deposit_cents: number | null;
   date: string; // YYYY-MM-DD
   time: string; // HH:MM 24h
+  // What the client typed in the booking sheet. Only the owner messages show
+  // it, so she knows what to expect before the client sits down.
+  notes?: string | null;
   // Money model (see _shared/money.ts). Optional so callers holding an older
   // row shape still compile; missing means nothing has been paid yet.
   paid_cents?: number | null;
@@ -106,55 +111,6 @@ interface RenderedMessage {
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
-}
-
-function tplBookingCreated(b: BookingLike, checkoutUrl: string): RenderedMessage {
-  const amount = fmtMoney(b.deposit_cents ?? 0);
-  if (isPaidInFull(b)) {
-    return {
-      subject: `Almost booked: ${b.service_name} on ${fmtDate(b.date)}`,
-      emailBody: [
-        `Hi ${firstName(b)},`,
-        ``,
-        `Your ${b.service_name} appointment is being held for ${when(b)}.`,
-        ``,
-        `This service is paid in full when you book. Total: ${amount}`,
-        ``,
-        `Pay here to lock it in: ${checkoutUrl}`,
-        ``,
-        `Payment is due within 24 hours of booking or the appointment is canceled. Once paid, nothing is due at your appointment.`,
-        ``,
-        PHONE_LINE,
-        ``,
-        SITE_NAME,
-      ].join("\n"),
-      smsBody:
-        `${SITE_NAME}: your ${b.service_name} on ${when(b)} is held. ` +
-        `Pay ${amount} in full within 24 hours to lock it in: ${checkoutUrl}`,
-    };
-  }
-  return {
-    subject: `Almost booked: ${b.service_name} on ${fmtDate(b.date)}`,
-    emailBody: [
-      `Hi ${firstName(b)},`,
-      ``,
-      `Your ${b.service_name} appointment is being held for ${when(b)}.`,
-      ``,
-      `Total: ${b.price}`,
-      `Deposit to lock it in: ${amount}`,
-      ``,
-      `Pay your deposit here: ${checkoutUrl}`,
-      ``,
-      `Deposits are due within 24 hours of booking or the appointment is canceled. Your deposit comes off your balance the day of your service.`,
-      ``,
-      PHONE_LINE,
-      ``,
-      SITE_NAME,
-    ].join("\n"),
-    smsBody:
-      `${SITE_NAME}: your ${b.service_name} on ${when(b)} is held. ` +
-      `Pay your ${amount} deposit within 24 hours to lock it in: ${checkoutUrl}`,
-  };
 }
 
 function tplBookingRequest(b: BookingLike): RenderedMessage {
@@ -245,7 +201,7 @@ function tplBalancePaid(b: BookingLike): RenderedMessage {
 // Ebony has to decide what to do with it in Stripe. This never goes to the
 // client, so nobody is promised a refund that has not happened.
 function tplPaymentNeedsRefund(b: BookingLike): RenderedMessage {
-  const who = b.client_name?.trim() || b.client_email;
+  const name = who(b);
   return {
     subject: `Payment received for an appointment that is not open: ${fmtDate(b.date)}`,
     emailBody: [
@@ -255,8 +211,9 @@ function tplPaymentNeedsRefund(b: BookingLike): RenderedMessage {
       ``,
       b.service_name,
       when(b),
-      `Client: ${who} (${b.client_email})`,
+      `Client: ${name} (${b.client_email})`,
       `Status: ${b.status ?? "unknown"}`,
+      `Reach her at ${reachAt(b)}`,
       ``,
       `The booking was left exactly as it was. Open this payment in your Stripe`,
       `dashboard, decide whether to refund it, and let the client know.`,
@@ -264,8 +221,31 @@ function tplPaymentNeedsRefund(b: BookingLike): RenderedMessage {
       SITE_NAME,
     ].join("\n"),
     smsBody:
-      `${SITE_NAME}: a payment landed for ${who} on ${when(b)}, an appointment ` +
+      `${SITE_NAME}: a payment landed for ${name} on ${when(b)}, an appointment ` +
       `that is not taking money. Check your Stripe dashboard.`,
+  };
+}
+
+// Her deposit rule, actually enforced: a deposit that never arrived within 24
+// hours of booking cancels the appointment. Wording is her own policy from
+// styleseat-reference.md, nothing new invented.
+function tplBookingCanceledDepositUnpaid(b: BookingLike): RenderedMessage {
+  return {
+    subject: `Canceled: ${b.service_name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `Hi ${firstName(b)},`,
+      ``,
+      `Your ${b.service_name} appointment on ${when(b)} has been canceled because the deposit was not paid within 24 hours of booking.`,
+      ``,
+      `A deposit is what secures every appointment. You are welcome to book again anytime.`,
+      ``,
+      PHONE_LINE,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${SITE_NAME}: your ${b.service_name} on ${when(b)} was canceled because the ` +
+      `deposit was not paid within 24 hours. Book again anytime.`,
   };
 }
 
@@ -285,6 +265,187 @@ function tplBookingCanceled(b: BookingLike, canceledBy: "client" | "admin"): Ren
     smsBody:
       `${SITE_NAME}: your ${b.service_name} on ${when(b)} has been canceled${byLine}. ` +
       `Book again anytime.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// What Ebony is told (API.md "What Ebony is told"). She should never have to
+// open the dashboard to find out something happened to her day.
+//
+// These are OWNER messages. They are never sent to a client, which is why the
+// only way to send one is deliverToOwner() below: it resolves her address
+// itself and takes no recipient argument. Every one of them names the client
+// and her number, so Ebony can act straight from the message.
+// ---------------------------------------------------------------------------
+
+function who(b: BookingLike): string {
+  return b.client_name?.trim() || b.client_email || "A client";
+}
+
+// How to reach the client, best contact first. Never invent one: say plainly
+// when there is nothing on file.
+function reachAt(b: BookingLike): string {
+  return b.client_phone?.trim() || b.client_email || "no contact on file";
+}
+
+function summaryLines(b: BookingLike): string[] {
+  const lines = [b.service_name, when(b), `Price: ${b.price}`];
+  if (b.deposit_cents != null) lines.push(`Deposit: ${fmtMoney(b.deposit_cents)}`);
+  return lines;
+}
+
+// What is still owed, in her words, for a booking whose deposit just landed.
+function stillOwed(b: BookingLike, balanceCents: number | null): string {
+  if (b.paid_in_full || isPaidInFull(b)) return "nothing left to collect";
+  if (balanceCents != null) return `${fmtMoney(balanceCents)} due at the appointment`;
+  return "the rest settled with her in person";
+}
+
+function tplOwnerNewBooking(b: BookingLike, balanceCents: number | null): RenderedMessage {
+  const name = who(b);
+  const deposit = fmtMoney(b.deposit_cents ?? 0);
+  return {
+    subject: `New booking: ${name}, ${b.service_name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `${name} just booked and paid the deposit.`,
+      ``,
+      ...summaryLines(b),
+      `Deposit received: ${deposit}`,
+      `Still owed: ${stillOwed(b, balanceCents)}`,
+      ``,
+      `Reach her at ${reachAt(b)}`,
+      ...(b.notes?.trim() ? [``, `What she said: ${b.notes.trim()}`] : []),
+      ``,
+      `This time is now blocked off for you.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `New booking: ${name}, ${b.service_name} ${when(b)}. Deposit ${deposit} paid.` +
+      (b.client_phone ? ` Her number: ${b.client_phone}` : ``),
+  };
+}
+
+function tplOwnerBookingRequest(b: BookingLike): RenderedMessage {
+  const name = who(b);
+  return {
+    subject: `Needs your yes: ${name}, ${b.service_name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `${name} asked for a time. This service has no published deposit, so it is waiting on you.`,
+      ``,
+      ...summaryLines(b),
+      ``,
+      `Reach her at ${reachAt(b)}`,
+      ...(b.notes?.trim() ? [``, `What she said: ${b.notes.trim()}`] : []),
+      ``,
+      `Confirm it or cancel it in your dashboard.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `Booking request: ${name}, ${b.service_name} ${when(b)}. Needs your yes.` +
+      (b.client_phone ? ` Her number: ${b.client_phone}` : ``),
+  };
+}
+
+function tplOwnerClientCanceled(b: BookingLike): RenderedMessage {
+  const name = who(b);
+  return {
+    subject: `Client cancellation: ${name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `${name} canceled her appointment.`,
+      ``,
+      ...summaryLines(b),
+      ``,
+      `Reach her at ${reachAt(b)}`,
+      ``,
+      `That slot is open again.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${name} canceled ${b.service_name} on ${when(b)}. That slot is open again.` +
+      (b.client_phone ? ` Her number: ${b.client_phone}` : ``),
+  };
+}
+
+function tplOwnerBalancePaid(b: BookingLike, amountCents: number): RenderedMessage {
+  const name = who(b);
+  return {
+    subject: `Paid in full: ${name} on ${fmtDate(b.date)}`,
+    emailBody: [
+      `${name} just paid the rest online.`,
+      ``,
+      ...summaryLines(b),
+      `Paid online: ${fmtMoney(amountCents)}`,
+      ``,
+      `Reach her at ${reachAt(b)}`,
+      ``,
+      `Nothing to collect at this appointment.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${name} paid the rest of ${b.service_name} (${when(b)}) online. ` +
+      `Nothing to collect.`,
+  };
+}
+
+function tplOwnerDepositExpired(b: BookingLike): RenderedMessage {
+  const name = who(b);
+  return {
+    subject: `Slot reopened: ${name} never paid the deposit`,
+    emailBody: [
+      `${name} did not pay the deposit within 24 hours, so this appointment was canceled and the time is open again.`,
+      ``,
+      ...summaryLines(b),
+      ``,
+      `Reach her at ${reachAt(b)} if you want to give her another shot.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${name} never paid the deposit for ${b.service_name} on ${when(b)}. ` +
+      `That time is open again.`,
+  };
+}
+
+// Money landed on a hold that had already run out, so nothing went on her
+// calendar. Owner alert only: the client is never promised a refund that has
+// not happened.
+export interface ExpiredHoldPayment {
+  service_name: string | null;
+  date: string | null;
+  time: string | null;
+  client_name: string | null;
+  client_email: string | null;
+  client_phone: string | null;
+  amount_cents: number | null;
+}
+
+function tplOwnerHoldExpiredRefund(h: ExpiredHoldPayment): RenderedMessage {
+  const name = h.client_name?.trim() || h.client_email || "A client";
+  const slot = h.date && h.time ? `${fmtDate(h.date)} at ${fmtTime(h.time)}` : "an unknown time";
+  return {
+    subject: `Refund needed: a deposit landed after the hold ran out`,
+    emailBody: [
+      `Heads up,`,
+      ``,
+      `A deposit came through after the hold on that time had already run out, so nothing was put on your calendar and the slot is still open.`,
+      ``,
+      h.service_name ?? "Service not recorded",
+      slot,
+      `Client: ${name}${h.client_email ? ` (${h.client_email})` : ""}`,
+      `Reach her at ${h.client_phone?.trim() || h.client_email || "no contact on file"}`,
+      ...(h.amount_cents != null ? [`Paid: ${fmtMoney(h.amount_cents)}`] : []),
+      ``,
+      `Refund this one in your Stripe dashboard and let her know she can pick a new time.`,
+      ``,
+      SITE_NAME,
+    ].join("\n"),
+    smsBody:
+      `${SITE_NAME}: a deposit landed for ${name} after the hold on ${slot} ran out. ` +
+      `Nothing was booked. Refund it in Stripe.`,
   };
 }
 
@@ -444,13 +605,50 @@ function bookingRecipient(b: BookingLike): Recipient {
   };
 }
 
+// Where owner alerts go: her admin account (RUNBOOK step 2 grants is_admin by
+// email), with OWNER_EMAIL / OWNER_PHONE as overrides for a project where the
+// admin row does not exist yet or where she wants alerts somewhere else.
+// SMS only happens once a number is on file and Twilio is configured; email
+// always works.
+async function ownerContact(): Promise<Recipient> {
+  const envEmail = (Deno.env.get("OWNER_EMAIL") ?? "").trim();
+  const envPhone = (Deno.env.get("OWNER_PHONE") ?? "").trim();
+  const res = await adminDb()
+    .from("clients")
+    .select("id, email, phone")
+    .eq("is_admin", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) console.error("Owner alert: could not load the owner:", res.error.message);
+  const owner = res.data as { id: string; email: string; phone: string | null } | null;
+  return {
+    email: envEmail || owner?.email || null,
+    phone: envPhone || owner?.phone || null,
+    client_id: owner?.id ?? null,
+    booking_id: null,
+  };
+}
+
+// THE ONLY WAY TO SEND AN OWNER MESSAGE.
+//
+// Owner alerts name the client and her phone number, so one addressed to the
+// wrong person would hand a stranger someone else's contact details. This
+// function resolves Ebony's address itself and takes no recipient argument, so
+// there is no call site where the wrong address can be passed in. Nothing else
+// in this file sends an owner template.
+async function deliverToOwner(
+  event: string,
+  msg: RenderedMessage,
+  bookingId: string | null,
+): Promise<void> {
+  const owner = await ownerContact();
+  await deliver(event, { ...owner, booking_id: bookingId }, msg);
+}
+
 // ---------------------------------------------------------------------------
 // Public API, one function per event (ARCHITECTURE.md notification events)
 // ---------------------------------------------------------------------------
-
-export async function notifyBookingCreated(b: BookingLike, checkoutUrl: string): Promise<void> {
-  await deliver("booking_created", bookingRecipient(b), tplBookingCreated(b, checkoutUrl));
-}
 
 export async function notifyBookingRequest(b: BookingLike): Promise<void> {
   await deliver("booking_request", bookingRecipient(b), tplBookingRequest(b));
@@ -469,34 +667,70 @@ export async function notifyBalancePaid(b: BookingLike): Promise<void> {
   await deliver("balance_paid", bookingRecipient(b), tplBalancePaid(b));
 }
 
-// Goes to Ke'Ebonie (clients.is_admin), not to the client.
-export async function notifyPaymentNeedsRefund(b: BookingLike): Promise<void> {
-  const res = await adminDb()
-    .from("clients")
-    .select("id, email, phone")
-    .eq("is_admin", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (res.error) console.error("Refund alert: could not load the owner:", res.error.message);
-  const owner = res.data as { id: string; email: string; phone: string | null } | null;
-  await deliver(
-    "payment_needs_refund",
-    {
-      email: owner?.email ?? null,
-      phone: owner?.phone ?? null,
-      client_id: owner?.id ?? null,
-      booking_id: b.id,
-    },
-    tplPaymentNeedsRefund(b),
-  );
-}
-
 export async function notifyBookingCanceled(
   b: BookingLike,
   canceledBy: "client" | "admin",
 ): Promise<void> {
   await deliver("booking_canceled", bookingRecipient(b), tplBookingCanceled(b, canceledBy));
+}
+
+// The 24-hour deposit deadline ran out (see _shared/deposits.ts).
+export async function notifyDepositExpired(b: BookingLike): Promise<void> {
+  await deliver(
+    "booking_canceled_deposit_unpaid",
+    bookingRecipient(b),
+    tplBookingCanceledDepositUnpaid(b),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Owner alerts. All six events in API.md "What Ebony is told". Every one of
+// these goes to HER and only her, through deliverToOwner.
+// ---------------------------------------------------------------------------
+
+/** A deposit landed and a new appointment is on the books. */
+export async function notifyOwnerNewBooking(
+  b: BookingLike,
+  balanceCents: number | null = balanceCentsFor(b),
+): Promise<void> {
+  await deliverToOwner("owner_new_booking", tplOwnerNewBooking(b, balanceCents), b.id);
+}
+
+/** A service with no published deposit: it is waiting on her yes. */
+export async function notifyOwnerBookingRequest(b: BookingLike): Promise<void> {
+  await deliverToOwner("owner_booking_request", tplOwnerBookingRequest(b), b.id);
+}
+
+/** The client canceled. She did not, so she needs telling. */
+export async function notifyOwnerClientCanceled(b: BookingLike): Promise<void> {
+  await deliverToOwner("owner_client_canceled", tplOwnerClientCanceled(b), b.id);
+}
+
+/** The rest of the price came in online, so there is nothing to collect. */
+export async function notifyOwnerBalancePaid(
+  b: BookingLike,
+  amountCents: number,
+): Promise<void> {
+  await deliverToOwner("owner_balance_paid", tplOwnerBalancePaid(b, amountCents), b.id);
+}
+
+/** A deposit never arrived, the appointment came off, the slot reopened. */
+export async function notifyOwnerDepositExpired(b: BookingLike): Promise<void> {
+  await deliverToOwner("owner_deposit_expired", tplOwnerDepositExpired(b), b.id);
+}
+
+/** Money landed on a booking that is not taking any. Goes to her, not the client. */
+export async function notifyPaymentNeedsRefund(b: BookingLike): Promise<void> {
+  await deliverToOwner("payment_needs_refund", tplPaymentNeedsRefund(b), b.id);
+}
+
+/**
+ * A deposit landed after the hold had already run out, so no appointment was
+ * created. There is no booking row to point at, which is why this takes the
+ * hold (or what the Stripe session knew) instead.
+ */
+export async function notifyHoldExpiredRefund(h: ExpiredHoldPayment): Promise<void> {
+  await deliverToOwner("hold_expired_refund", tplOwnerHoldExpiredRefund(h), null);
 }
 
 export async function notifyBroadcast(

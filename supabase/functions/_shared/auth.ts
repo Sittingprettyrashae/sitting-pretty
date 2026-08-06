@@ -46,8 +46,12 @@ async function syncClient(userId: string): Promise<ClientRow | null> {
     console.error("sp_sync_client failed:", error);
     throw new HttpError(500, "Could not load your account");
   }
+  // Same trap as sp_book_hold: a function returning a NULL composite comes back
+  // as one row of all-null columns, not as nothing. Without checking a real
+  // column, a missing client would look like a signed-in client with no id.
   const row = Array.isArray(data) ? data[0] : data;
-  return (row as ClientRow | null) ?? null;
+  const client = row && (row as ClientRow).id ? (row as ClientRow) : null;
+  return client;
 }
 
 export async function requireClient(req: Request): Promise<ClientRow> {

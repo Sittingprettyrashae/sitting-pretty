@@ -18,6 +18,8 @@
 //   production checkout_url is a real Stripe Checkout page and the outbox
 //   is the notifications_log table.
 
+import { sweepExpiredDeposits } from "../_shared/deposits.ts";
+import { sweepExpiredHolds } from "../_shared/holds.ts";
 import { corsHeaders, errorResponse, HttpError } from "../_shared/http.ts";
 import { handleAuth } from "./auth.ts";
 import {
@@ -25,6 +27,7 @@ import {
   handleCreateBooking,
   handleHours,
   handlePayBalance,
+  handleRefreshHold,
   handleServices,
 } from "./bookings.ts";
 import { handleMe } from "./me.ts";
@@ -43,11 +46,29 @@ Deno.serve(async (req: Request) => {
   const path = url.pathname.replace(/^\/functions\/v1/, "").replace(/^\/api/, "") || "/";
 
   try {
+    // Housekeeping before anything that reads availability or bookings, the
+    // same four paths the demo sweeps on (server/server.mjs). A slot must
+    // never stay locked by an abandoned checkout, and an appointment whose
+    // deposit never arrived must not keep sitting on her calendar. Both
+    // sweeps log their own failures and never break the request.
+    if (
+      path === "/availability" || path === "/me" || path === "/bookings" ||
+      path === "/admin/bookings"
+    ) {
+      await sweepExpiredHolds();
+      await sweepExpiredDeposits();
+    }
+
     if (req.method === "GET" && path === "/services") return handleServices();
     if (req.method === "GET" && path === "/hours") return await handleHours();
     if (req.method === "GET" && path === "/availability") return await handleAvailability(url);
     if (path === "/me") return await handleMe(req);
     if (req.method === "POST" && path === "/bookings") return await handleCreateBooking(req);
+
+    const holdRefreshMatch = path.match(/^\/holds\/([^/]+)\/refresh$/);
+    if (req.method === "POST" && holdRefreshMatch) {
+      return await handleRefreshHold(req, holdRefreshMatch[1]);
+    }
 
     const cancelMatch = path.match(/^\/bookings\/([^/]+)\/cancel$/);
     if (req.method === "POST" && cancelMatch) return await handleCancel(req, cancelMatch[1]);

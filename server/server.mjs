@@ -1590,6 +1590,14 @@ async function handleApi(req, res, url) {
     if (!hold || hold.client_id !== client.id) {
       throw new ApiError(410, 'That time is no longer being held for you. Please pick a time again.');
     }
+    // One extension only. A hold blocks the slot exactly like a booking does,
+    // so refreshing without limit would let somebody sit on a Saturday for
+    // free and look identical to a paid appointment to everyone else.
+    if (hold.refresh_count) {
+      throw new ApiError(410,
+        'We have held this time as long as we can. Please pick a time again.');
+    }
+    hold.refresh_count = 1;
     hold.expires_at = new Date(Date.now() + HOLD_MS).toISOString();
     save();
     return sendJson(res, 200, { hold });

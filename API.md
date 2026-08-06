@@ -179,7 +179,10 @@ Payment effects:
 
 She should never have to open the dashboard to find out something happened.
 Every event that changes her day reaches her by email, and by SMS once a number
-is configured. Owner notifications go to `ADMIN_EMAILS[0]` and her phone.
+is configured. Owner notifications go to the configured owner address and her
+phone: `ADMIN_EMAILS[0]` + `OWNER_PHONE` on the mock server, and on production
+her admin account (the `clients` row with `is_admin`), which `OWNER_EMAIL` and
+`OWNER_PHONE` override when set.
 
 | Event | She is told |
 |---|---|
@@ -200,7 +203,12 @@ from the notification. They are never sent to the client.
 - `POST /api/stripe/webhook` — production path (checkout.session.completed →
   same transition). Mock accepts it too for parity testing. The session's
   `metadata.kind` selects the path: `balance` applies a balance payment,
-  anything else (including sessions predating the field) is the deposit.
+  anything else (including sessions predating the field) is the deposit. A
+  deposit session carries `metadata.hold_id`, the slot it is paying for, and
+  that is what becomes the booking. A deposit session carrying `booking_id`
+  instead is one created before the hold model and still confirms its
+  `awaiting_deposit` booking. Paying for a hold that has already expired
+  creates nothing and raises the refund alert.
   Production verifies the Stripe signature, requires `payment_status: "paid"`,
   requires `amount_total` to equal what was expected for that kind (the
   `deposit_cents`, or the computed `balance_cents`), is idempotent on replay,
