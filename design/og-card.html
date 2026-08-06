@@ -1,0 +1,77 @@
+<!-- Source for assets/og-card.jpg (the link-preview card).
+     Re-render: serve the repo, screenshot this at 1200x630 with a 2x device
+     scale factor, then downsize to exactly 1200x630. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@500,700,900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playball&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg: oklch(97.5% 0.009 60);
+    --surface: oklch(99.2% 0.004 80);
+    --ink: oklch(27% 0.05 350);
+    --ink-dim: oklch(46% 0.035 345);
+    --rose: oklch(58% 0.145 5);
+    --rose-deep: oklch(48% 0.15 0);
+    --rose-soft: oklch(92% 0.035 10);
+    --champagne: oklch(80% 0.065 80);
+    --line: oklch(89% 0.018 30);
+  }
+  body{
+    width:1200px;height:630px;overflow:hidden;
+    font-family:'Satoshi',sans-serif;color:var(--ink);
+    background:
+      radial-gradient(50vw 60vh at 88% -10%, oklch(94% 0.035 15 / .8), transparent 62%),
+      radial-gradient(46vw 50vh at -8% 108%, oklch(95% 0.03 60 / .7), transparent 60%),
+      var(--bg);
+    display:grid;grid-template-columns:1.06fr .94fr;align-items:center;
+  }
+  .left{padding:0 0 0 72px}
+  .wordmark{font-family:'Playball',cursive;font-size:42px;color:var(--rose);line-height:1;margin-bottom:14px}
+  h1{
+    font-size:56px;font-weight:900;line-height:1.03;letter-spacing:-0.028em;
+    max-width:14ch;margin-bottom:18px;
+  }
+  .who{font-size:22px;font-weight:700;color:var(--ink-dim);margin-bottom:5px}
+  .where{font-size:19px;font-weight:500;color:var(--ink-dim)}
+  .rule{width:78px;height:4px;background:var(--rose);border-radius:99px;margin:20px 0 16px}
+  .proof{display:flex;align-items:center;gap:11px;font-size:18px;color:var(--ink-dim);font-weight:500}
+  .proof b{color:var(--ink);font-weight:900}
+  .stars{color:var(--champagne);font-size:19px;letter-spacing:2px}
+  .tags{display:flex;gap:9px;margin-top:20px;flex-wrap:nowrap}
+  .tag{
+    font-size:14px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--rose-deep);background:var(--rose-soft);
+    padding:7px 13px;border-radius:99px;white-space:nowrap;
+  }
+  /* photos: her real work, stacked like a set of polaroids */
+  .right{position:relative;height:630px}
+  .ph{position:absolute;object-fit:cover;border:9px solid var(--surface);border-radius:22px;
+      box-shadow:0 18px 44px oklch(40% 0.06 350 / .19)}
+  .p1{width:296px;height:370px;right:112px;top:130px;transform:rotate(-4.5deg);z-index:2}
+  .p2{width:190px;height:190px;right:30px;top:86px;transform:rotate(6deg);z-index:3}
+  .p3{width:190px;height:190px;right:38px;bottom:88px;transform:rotate(4.5deg);z-index:3}
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="wordmark">Sitting Pretty</div>
+    <h1>Hair that walks in the room before you do.</h1>
+    <div class="who">Ke&rsquo;Ebonie Hill &middot; Hair &amp; Makeup</div>
+    <div class="where">Fort Worth, TX</div>
+    <div class="rule"></div>
+    <div class="proof"><span class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span> <span><b>4.9</b> from <b>138</b> clients</span></div>
+    <div class="tags">
+      <span class="tag">Sew-ins</span><span class="tag">Knotless</span><span class="tag">Wigs</span><span class="tag">Locs</span><span class="tag">Glam</span>
+    </div>
+  </div>
+  <div class="right">
+    <img class="ph p1" src="../assets/gallery-05.jpg" alt="">
+    <img class="ph p2" src="../assets/gallery-09.jpg" alt="">
+    <img class="ph p3" src="../assets/gallery-19.jpg" alt="">
+  </div>
+</body>
+</html>
