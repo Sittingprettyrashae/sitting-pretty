@@ -8,6 +8,16 @@
 
   function $(id) { return document.getElementById(id); }
 
+  // Google is only usable once it is configured on her Supabase project. Until
+  // then, hide the button and its divider so nobody taps into a JSON error.
+  (function hideGoogleUntilReady() {
+    if (window.SP_CONFIG && window.SP_CONFIG.googleEnabled) return;
+    document.addEventListener("DOMContentLoaded", function () {
+      var g = $("google-btn"); if (g) g.hidden = true;
+      var line = document.querySelector("#login-view .or-line"); if (line) line.hidden = true;
+    });
+  })();
+
   // ---------------- state ----------------
   var state = {
     client: null,

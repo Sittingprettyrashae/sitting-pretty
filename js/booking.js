@@ -522,9 +522,17 @@
       ? "Make an account once and your next booking is just a couple of taps."
       : "Welcome back. Sign in and your details are already here."}</p>`));
 
-    const gbtn = el(`<button type="button" class="btn btn-ghost btn-google">${GOOGLE_MARK}<span>Continue with Google</span></button>`);
-    body.appendChild(gbtn);
-    body.appendChild(el(`<div class="or-line"><span>or</span></div>`));
+    // Google only appears once it is configured on her Supabase project. A
+    // disabled provider would bounce the client to a raw JSON error page, so
+    // until the config flag flips, this is email and code only.
+    const googleReady = !!(window.SP_CONFIG && window.SP_CONFIG.googleEnabled);
+    const gbtn = googleReady
+      ? el(`<button type="button" class="btn btn-ghost btn-google">${GOOGLE_MARK}<span>Continue with Google</span></button>`)
+      : null;
+    if (gbtn) {
+      body.appendChild(gbtn);
+      body.appendChild(el(`<div class="or-line"><span>or</span></div>`));
+    }
 
     const tabs = el(`
       <div class="seg" role="tablist" aria-label="Email sign in">
@@ -561,7 +569,7 @@
       S.authTab = tab; render();
     });
 
-    gbtn.addEventListener("click", () => { stashPending(); SP.loginWithGoogle(); });
+    if (gbtn) gbtn.addEventListener("click", () => { stashPending(); SP.loginWithGoogle(); });
 
     links.addEventListener("click", e => {
       const a = e.target.closest("[data-alt]");

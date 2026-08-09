@@ -35,6 +35,29 @@ export interface ClientRow {
   created_at: string;
 }
 
+// The owner accounts, from the same ADMIN_EMAILS secret the demo uses, so there
+// is one source of truth for who Ke'Ebonie is. Without this, admin depended on
+// a human remembering to run an UPDATE after her first sign-in, and until they
+// did she would land in an empty client view instead of her own dashboard.
+function adminEmails(): string[] {
+  return (Deno.env.get("ADMIN_EMAILS") ?? "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+// Make the stored is_admin match the secret. Grant when her email is listed;
+// revoke only when the list is non-empty and her email is not on it, so a
+// missing or empty secret can never silently lock her out of her dashboard.
+async function reconcileAdmin(row: ClientRow): Promise<ClientRow> {
+  const list = adminEmails();
+  if (!list.length) return row;
+  const shouldBeAdmin = list.includes((row.email ?? "").toLowerCase());
+  if (shouldBeAdmin === row.is_admin) return row;
+  const db = adminDb();
+  const upd = await db.from("clients")
+    .update({ is_admin: shouldBeAdmin }).eq("id", row.id).select("*").maybeSingle();
+  return (upd.data as ClientRow) ?? { ...row, is_admin: shouldBeAdmin };
+}
+
 // Ask Postgres to (re)build the clients row from auth.users + auth.identities.
 // Same function the auth triggers call, so there is exactly one definition of
 // has_password and auth_provider. Returns null when the email is already held
@@ -81,9 +104,9 @@ export async function requireClient(req: Request): Promise<ClientRow> {
     const googleLinked = providers.includes("google");
     const drifted = (googleLinked && row.auth_provider !== "google") ||
       (row.email ?? "").toLowerCase() !== (user.email ?? "").toLowerCase();
-    if (!drifted) return row;
+    if (!drifted) return reconcileAdmin(row);
     const refreshed = await syncClient(user.id);
-    return refreshed ?? row;
+    return reconcileAdmin(refreshed ?? row);
   }
 
   // No row yet. Normal on the very first request after sign-up if the request
@@ -95,7 +118,7 @@ export async function requireClient(req: Request): Promise<ClientRow> {
       "That email is already set up with a different sign-in method. Sign in the way you did before, or reset your password",
     );
   }
-  return created;
+  return reconcileAdmin(created);
 }
 
 export async function requireAdmin(req: Request): Promise<ClientRow> {
