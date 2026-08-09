@@ -21,9 +21,16 @@ Once you have it, tell me and I will put it everywhere it belongs in one pass.
 
 She signs up, with the address above. Her name, her email, her password, her money.
 
-1. **Stripe** stripe.com — needs her bank account + routing numbers and a photo
-   ID. This is Stripe verifying her identity; it is why payouts land in her
-   account automatically and why you never touch her banking details.
+1. **Stripe** — account already made (keeboniehill@gmail.com). It is NOT
+   activated yet: `charges_enabled` and `payouts_enabled` are both false and
+   she has not submitted details. Finish it in her dashboard: bank account and
+   routing numbers, plus a photo ID. That is Stripe verifying her identity, and
+   it is why payouts land in her account and why you never touch her banking
+   details. Also set the business name: it currently reads "Sitting Pretty
+   Rashae's sandbox", and clients see that on the payment page.
+   **Rotate the secret key** while you are in there. It was sent in plaintext,
+   so treat it as burned: Developers > API keys > roll it, then tell me the new
+   one and I will swap it in.
 2. **Supabase** supabase.com — free tier. Create a project, any region near TX.
 3. **Google Cloud** console.cloud.google.com — free. This is only so "Continue
    with Google" works on her booking page.
@@ -64,6 +71,13 @@ URI all point at the address, so they get updated together.
 
 If she wants to choose one while you are there, check availability for
 something short she can say out loud in a DM.
+
+## 4b. Real Stripe checkout already works
+
+Test mode is live on the demo, so the deposit step goes to a genuine Stripe
+page with her business name on it, Apple Pay and Cash App included. Pay with
+the test card **4242 4242 4242 4242**, any future expiry, any CVC, any ZIP.
+No real money moves until her account is activated and the live keys go in.
 
 ## 5. Show her the thing
 
