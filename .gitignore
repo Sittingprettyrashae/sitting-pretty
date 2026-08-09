@@ -4,3 +4,6 @@
 server/db.json
 server/db.json.tmp
 uploads/
+
+# Real addresses and keys. Never committed: this repo is public.
+server/.env.local

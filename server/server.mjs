@@ -17,6 +17,28 @@ const ROOT = path.resolve(__dirname, '..');
 // PORT, different file) without the two overwriting each other's data.
 const DB_PATH = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(__dirname, 'db.json');
 const PORT = Number(process.env.PORT || 4870);
+
+// Real addresses live in server/.env.local, which is gitignored. This repo is
+// public, so committing her Gmail would hand it to every scraper that walks
+// GitHub, and she would be the one getting the spam. Anything already in the
+// environment wins, so production config is unaffected.
+loadLocalEnv();
+function loadLocalEnv() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '.env.local'), 'utf8');
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const eq = t.indexOf('=');
+      if (eq < 1) continue;
+      const key = t.slice(0, eq).trim();
+      if (process.env[key] === undefined) {
+        process.env[key] = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+      }
+    }
+  } catch { /* not there: fall back to the demo placeholder below */ }
+}
+
 // Her studio line. Owner alerts text here once an SMS number is configured.
 const OWNER_PHONE = process.env.OWNER_PHONE || '(817) 704-8300';
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'ebony@demo.local')

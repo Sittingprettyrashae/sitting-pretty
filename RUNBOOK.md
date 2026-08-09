@@ -78,9 +78,10 @@ If Nelson needs dashboard access, she can invite him as a team member
    is created by trigger at first login). In the SQL Editor:
 
    ```sql
-   -- PLACEHOLDER: ebony@demo.local is NOT her real email. Get it from her
-   -- (step 8) before running this.
-   update public.clients set is_admin = true where email = 'ebony@demo.local';
+   -- Use HER Gmail address, confirmed 2026-08-09. It is deliberately not
+   -- written in this repo (public: committing it invites scrapers), so copy
+   -- it from server/.env.local, which is gitignored and already has it.
+   update public.clients set is_admin = true where email = '<her address from server/.env.local>';
    ```
 
 ## 2b) Turn on all three ways to sign in

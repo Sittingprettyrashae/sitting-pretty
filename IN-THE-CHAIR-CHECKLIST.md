@@ -3,7 +3,7 @@
 Braids run hours. That is more than enough time to get her live. Work down this
 list on your laptop; she only has to touch the parts marked **HER**.
 
-## 0. First, settle the email (2 minutes, do this before anything else)
+## 0. Email: settled
 
 Two sources disagree and everything else keys off this:
 
@@ -19,7 +19,7 @@ Once you have it, tell me and I will put it everywhere it belongs in one pass.
 
 ## 1. HER accounts (about 30 minutes, she drives)
 
-She signs up. Her name, her email, her password, her money.
+She signs up, with the address above. Her name, her email, her password, her money.
 
 1. **Stripe** stripe.com — needs her bank account + routing numbers and a photo
    ID. This is Stripe verifying her identity; it is why payouts land in her

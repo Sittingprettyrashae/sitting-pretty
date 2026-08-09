@@ -81,13 +81,11 @@ accounts.
 
 ## What Nelson needs from her
 
-1. **Her real email address** for the business (the one clients would recognize).
-   The site currently uses a placeholder.
-2. **The domain she wants.** A few options to check availability on.
-3. **Is she a licensed cosmetologist?** The word "licensed" is off the site until
+1. **The domain she wants.** A few options to check availability on.
+2. **Is she a licensed cosmetologist?** The word "licensed" is off the site until
    she confirms, because that is a credential claim.
-4. **Her Instagram handle**, to link from the site.
-5. **Yes or no on text messages.** Everything is written and ready to text, but
+3. **Her Instagram handle**, to link from the site.
+4. **Yes or no on text messages.** Everything is written and ready to text, but
    until a number is set up it all goes out by email only. That includes the
    alerts about her own bookings. Adding real texting costs about $1.15 a month
    for the number plus roughly a penny per message. Her clients are phone
