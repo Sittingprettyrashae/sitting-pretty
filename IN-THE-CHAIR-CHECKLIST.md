@@ -1,0 +1,75 @@
+# While you're in her chair
+
+Braids run hours. That is more than enough time to get her live. Work down this
+list on your laptop; she only has to touch the parts marked **HER**.
+
+## 0. First, settle the email (2 minutes, do this before anything else)
+
+Two sources disagree and everything else keys off this:
+
+- Her text to you said `her Gmail address (kept out of this repo)` (four t's)
+- Her StyleSeat address decodes to `sher Gmail address (kept out of this repo)` (two t's)
+
+**Do not type it in from either one.** Have her send you an email from her phone
+right there, or open Gmail and read it off her account. Every booking alert,
+her admin login, and her Stripe payouts hang on this being exact. One wrong
+letter and she never hears about a single booking.
+
+Once you have it, tell me and I will put it everywhere it belongs in one pass.
+
+## 1. HER accounts (about 30 minutes, she drives)
+
+She signs up. Her name, her email, her password, her money.
+
+1. **Stripe** stripe.com — needs her bank account + routing numbers and a photo
+   ID. This is Stripe verifying her identity; it is why payouts land in her
+   account automatically and why you never touch her banking details.
+2. **Supabase** supabase.com — free tier. Create a project, any region near TX.
+3. **Google Cloud** console.cloud.google.com — free. This is only so "Continue
+   with Google" works on her booking page.
+
+Have her use the same email everywhere, and get her to save the passwords
+somewhere she will still have them in a year.
+
+## 2. Wiring (you, ~20 minutes)
+
+`RUNBOOK.md` has the exact commands and the precise redirect URI to paste,
+which is the step people get wrong. Order: run `schema.sql`, deploy the edge
+functions, set the secrets, point the Stripe webhook, add her domain to the
+Supabase allow-list, then flip `js/config.js` from the demo to her project.
+
+## 3. Ask her while she works
+
+- Is she a **licensed cosmetologist**? The word is off her site until she says
+  yes, because it is a credential claim.
+- Her **Instagram handle**, to link from the site.
+- **Texting yes or no.** Until it is on, everything is email only, including
+  her own booking alerts. About $1.15/month plus a penny a message.
+- Does she want clients to be able to **pay the balance online**, or should
+  every balance be settled in her chair? Right now both work and nothing
+  pushes them either way.
+- **Photos.** The ones on the site came off StyleSeat and are only 540px, which
+  is soft on a modern phone. Ask her to AirDrop the originals of her favorites.
+- Anyone booking a service with no set deposit holds a real slot until she
+  confirms. Fine at her volume. Tell her it can be tightened later if it ever
+  gets abused.
+
+## 4. Domain (no rush)
+
+She does not need one today. The site works right now at
+`taylormadecreative.github.io/sitting-pretty`. When she picks one, it is about
+$12 a year through Cloudflare, and changing to it takes me a few minutes: the
+link-preview URLs, the Supabase redirect allow-list, and the Google redirect
+URI all point at the address, so they get updated together.
+
+If she wants to choose one while you are there, check availability for
+something short she can say out loud in a DM.
+
+## 5. Show her the thing
+
+Pull up the site on your phone and let her book an appointment with herself.
+Style, day, time, sign in, deposit. Then open her dashboard and show her the
+booking land, the Hours tab, and Message everyone with a flyer attached.
+
+What to watch for: does anything confuse her compared to StyleSeat, and are the
+prices and deposits still what she actually charges today.
