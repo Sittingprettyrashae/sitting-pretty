@@ -1,32 +1,17 @@
 // Sitting Pretty frontend config.
 //
 // LOAD ORDER MATTERS: this file must be included BEFORE js/api.js in both
-// index.html and dashboard.html:
+// index.html and dashboard.html.
 //
-//   <script src="js/config.js"></script>
-//   <script src="js/api.js"></script>
-//
-// js/api.js reads window.SP_CONFIG.apiBase and prefixes every API call with
-// it. Every call path already starts with "/api/...", so apiBase is
-// everything BEFORE the /api part:
-//
-//   Demo (local mock server, same origin):  apiBase: ""
-//   Production (Supabase edge function):
-//     apiBase: "https://YOUR-PROJECT-REF.supabase.co/functions/v1"
-//     (no trailing /api and no trailing slash; the deployed function is
-//     named "api", so the final URL becomes .../functions/v1/api/...)
-//
-// supabaseUrl and supabaseAnonKey are reserved for the production sign-in
-// switch (Supabase Auth email OTP via signInWithOtp / verifyOtp). js/api.js
-// does NOT read them yet; see RUNBOOK.md step 5 for the open item. The anon
-// public key is safe to publish in this file. The service role key is NOT:
-// it must never appear in any frontend file.
+// These two values are meant to be public. The anon key is designed to sit in
+// a browser: it grants nothing on its own, and row level security in her
+// database is what actually decides who can read or write what. The secret
+// keys (service_role, Stripe, her database password) live in
+// server/.env.local, which is gitignored, and in Supabase's own secret store.
 window.SP_CONFIG = {
-  // Demo default: same-origin mock server (server/server.mjs).
-  apiBase: "",
-
-  // Production values (replace and commit before deploying to Pages):
-  // apiBase: "https://YOUR-PROJECT-REF.supabase.co/functions/v1",
-  supabaseUrl: "", // production: "https://YOUR-PROJECT-REF.supabase.co"
-  supabaseAnonKey: "", // production: "REPLACE-WITH-ANON-PUBLIC-KEY"
+  // Her Supabase edge function. Every call path starts with /api/..., so this
+  // is everything before that. Set to "" to run against the local demo server.
+  apiBase: "https://zfffguimcawjxtbiesqn.supabase.co/functions/v1",
+  supabaseUrl: "https://zfffguimcawjxtbiesqn.supabase.co",
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZmZndWltY2F3anh0Ymllc3FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyOTU5MjAsImV4cCI6MjEwMTg3MTkyMH0.qzQ-KXDVstfmGB0VlxydkRrvN0CAz-K4AzwqbVopJPk",
 };

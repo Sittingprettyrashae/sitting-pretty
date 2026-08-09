@@ -12,7 +12,11 @@ export class HttpError extends Error {
 // (RUNBOOK step 3); default * keeps local testing painless.
 export const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_ORIGIN") ?? "*",
-  "Access-Control-Allow-Headers": "authorization, content-type, stripe-signature",
+  // apikey is required: Supabase's gateway rejects an edge-function call with no
+  // Authorization header, so an anonymous visitor has to send the anon key, and
+  // the browser will not send a header the preflight has not allowed. Without
+  // apikey here nobody who is not signed in can even load the price list.
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, stripe-signature",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };
 

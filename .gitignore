@@ -7,3 +7,6 @@ uploads/
 
 # Real addresses and keys. Never committed: this repo is public.
 server/.env.local
+
+# Supabase CLI scratch state
+supabase/.temp/

@@ -23,10 +23,16 @@ window.SP = (() => {
   (function absorbTokenFromHash() {
     const hash = window.location.hash || "";
     const m = /[#&]sp_token=([^&]+)/.exec(hash);
-    if (!m) return;
-    setToken(decodeURIComponent(m[1]));
+    const at = /[#&]access_token=([^&]+)/.exec(hash);
+    const rt = /[#&]refresh_token=([^&]+)/.exec(hash);
+    if (!m && !at) return;
+    if (m) setToken(decodeURIComponent(m[1]));
+    if (at) setToken(decodeURIComponent(at[1]));
+    if (rt) { try { localStorage.setItem("sp_refresh", decodeURIComponent(rt[1])); } catch (e) {} }
     cameBackFromRedirect = true;
-    const rest = hash.replace(/[#&]sp_token=[^&]*/, "").replace(/^#?&/, "#");
+    const rest = hash
+      .replace(/[#&](sp_token|access_token|refresh_token|expires_in|expires_at|token_type|provider_token|provider_refresh_token|type)=[^&]*/g, "")
+      .replace(/^#?&/, "#");
     const clean = window.location.pathname + window.location.search + (rest === "#" ? "" : rest);
     try { history.replaceState(null, "", clean); }
     catch (e) { window.location.hash = ""; }
@@ -52,7 +58,16 @@ window.SP = (() => {
   async function request(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
     const token = getToken();
+    const anon = (window.SP_CONFIG && window.SP_CONFIG.supabaseAnonKey) || "";
+    // Supabase puts a gateway in front of edge functions that rejects any
+    // request without an Authorization header, so a visitor who has not signed
+    // in yet cannot even read the price list. The anon key is designed to be
+    // public and sit in a browser; row level security is what actually guards
+    // the data. Send it as the floor, and the client's own token when there is
+    // one. The local demo has no anon key, so nothing changes there.
+    if (anon) headers.apikey = anon;
     if (token) headers.Authorization = "Bearer " + token;
+    else if (anon) headers.Authorization = "Bearer " + anon;
     let body = opts.body;
     if (body != null && typeof body !== "string") body = JSON.stringify(body);
     let res;
@@ -66,7 +81,15 @@ window.SP = (() => {
     let data = null;
     try { data = await res.json(); } catch (e) { /* non-JSON */ }
     if (!res.ok) {
-      if (res.status === 401 && !/\/api\/auth\//.test(path)) clearToken();
+      // A Supabase access token lasts about an hour. Rather than signing a
+      // client out mid-booking, spend the refresh token once and retry.
+      if (res.status === 401 && onSupabase && !opts.__retried && getRefresh() &&
+          !/\/api\/auth\/(bootstrap|logout)/.test(path)) {
+        if (await sbRefresh()) {
+          return request(path, Object.assign({}, opts, { __retried: true }));
+        }
+      }
+      if (res.status === 401 && !/\/api\/auth\//.test(path)) { clearToken(); clearRefresh(); }
       throw apiError(res.status, data);
     }
     return data;
@@ -92,6 +115,147 @@ window.SP = (() => {
   }
   const emailLooksOk = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim());
 
+
+  // ---------------------------------------------------------------------
+  // Two backends, one interface.
+  //
+  // The local demo server implements /api/auth/* itself. Her live site does
+  // NOT: the edge function returns 410 there on purpose, because Supabase Auth
+  // owns sign-in in production. Without this adapter every client hits a wall
+  // at the account step on the real site while the demo looks perfect.
+  //
+  // No library on purpose: the rest of this site is dependency-free static
+  // files, so this talks to the Supabase Auth REST API with plain fetch.
+  // ---------------------------------------------------------------------
+  const SB_URL = (window.SP_CONFIG && window.SP_CONFIG.supabaseUrl) || "";
+  const SB_KEY = (window.SP_CONFIG && window.SP_CONFIG.supabaseAnonKey) || "";
+  const onSupabase = !!(SB_URL && SB_KEY);
+  const RKEY = "sp_refresh";
+
+  const getRefresh = () => { try { return localStorage.getItem(RKEY); } catch (e) { return null; } };
+  const setRefresh = (t) => { try { if (t) localStorage.setItem(RKEY, t); } catch (e) {} };
+  const clearRefresh = () => { try { localStorage.removeItem(RKEY); } catch (e) {} };
+
+  async function sbFetch(path, body, method) {
+    const headers = { apikey: SB_KEY, "Content-Type": "application/json" };
+    const tok = getToken();
+    if (tok) headers.Authorization = "Bearer " + tok;
+    const res = await fetch(SB_URL + "/auth/v1" + path, {
+      method: method || "POST",
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw sbError(res.status, data);
+    return data || {};
+  }
+
+  // Supabase speaks in codes; her clients should read plain English, and the
+  // wrong-password case must not reveal whether the address has an account.
+  function sbError(status, data) {
+    const code = (data && (data.error_code || data.code)) || "";
+    const raw = (data && (data.msg || data.error_description || data.message || data.error)) || "";
+    let message;
+    if (code === "invalid_credentials" || /invalid login/i.test(raw)) {
+      message = "That email and password do not match. Please try again.";
+    } else if (code === "user_already_exists" || /already registered/i.test(raw)) {
+      message = "That email already has an account. Please sign in, or use a sign-in code.";
+    } else if (code === "over_email_send_rate_limit" || status === 429) {
+      message = "Too many tries just now. Please wait a few minutes and try again.";
+    } else if (code === "email_address_invalid" || /invalid.*email/i.test(raw)) {
+      message = "That email does not look right. Check it and try again.";
+    } else if (code === "weak_password") {
+      message = "That password is too easy to guess. Try another one.";
+    } else if (code === "otp_expired" || /expired/i.test(raw)) {
+      message = "That code has expired. Ask for a new one.";
+    } else if (/token|otp/i.test(code) || /invalid.*(token|code)/i.test(raw)) {
+      message = "That code is not right. Check it and try again.";
+    } else {
+      message = raw || "Something went wrong. Please try again.";
+    }
+    const err = new Error(message);
+    err.status = status;
+    err.data = data || null;
+    return err;
+  }
+
+  // A Supabase access token lasts about an hour. Her clients are promised they
+  // stay signed in, so swap the refresh token for a new session rather than
+  // dumping someone out in the middle of booking.
+  async function sbRefresh() {
+    const rt = getRefresh();
+    if (!rt) return false;
+    try {
+      const data = await sbFetch("/token?grant_type=refresh_token", { refresh_token: rt });
+      if (data && data.access_token) { storeSession(data); return true; }
+    } catch (e) { /* fall through: treat as signed out */ }
+    clearToken(); clearRefresh();
+    return false;
+  }
+
+  function storeSession(data) {
+    if (data && data.access_token) setToken(data.access_token);
+    if (data && data.refresh_token) setRefresh(data.refresh_token);
+  }
+
+  // Supabase hands back a user with no session when the address still needs
+  // confirming. Saying so beats a silent failure that looks like a bad password.
+  function requireSession(data, whenMissing) {
+    if (data && data.access_token) { storeSession(data); return data; }
+    const err = new Error(whenMissing);
+    err.status = 401;
+    err.data = data || null;
+    throw err;
+  }
+
+  // Make sure her clients row exists and carries the name and number she gave.
+  async function bootstrapClient(name, phone) {
+    try {
+      await request("/api/auth/bootstrap", {
+        method: "POST",
+        body: {
+          name: name ? String(name).trim() : undefined,
+          phone: phone ? String(phone).trim() : undefined,
+        },
+      });
+    } catch (e) { /* the row is created on first authenticated call anyway */ }
+  }
+
+  const sbAuth = {
+    signup: async (email, password, name, phone) => {
+      const data = await sbFetch("/signup", {
+        email, password,
+        data: { name: name || null, phone: phone || null },
+      });
+      requireSession(data,
+        "Check your email to confirm your address, then come back and sign in.");
+      await bootstrapClient(name, phone);
+      return data;
+    },
+    login: async (email, password) => {
+      const data = await sbFetch("/token?grant_type=password", { email, password });
+      requireSession(data, "That email and password do not match. Please try again.");
+      await bootstrapClient();
+      return data;
+    },
+    requestCode: (email) => sbFetch("/otp", { email, create_user: true }),
+    verify: async (email, code) => {
+      const data = await sbFetch("/verify", { email, token: code, type: "email" });
+      requireSession(data, "That code is not right. Check it and try again.");
+      await bootstrapClient();
+      return data;
+    },
+    setPassword: (password) => sbFetch("/user", { password }, "PUT"),
+    loginWithGoogle: (redirectPath) => {
+      const back = window.location.origin +
+        (redirectPath || (window.location.pathname + window.location.search));
+      window.location.href = SB_URL + "/auth/v1/authorize?provider=google&redirect_to=" +
+        encodeURIComponent(back);
+    },
+    logout: async () => { try { await sbFetch("/logout", {}); } catch (e) {} },
+  };
+
   return {
     request,
     PASSWORD_HINT,
@@ -101,37 +265,54 @@ window.SP = (() => {
     // True when this page load arrived back from the Google round trip.
     returnedFromRedirect: () => cameBackFromRedirect,
 
-    signup: (email, password, name, phone) => authRequest("/api/auth/signup", {
-      email: String(email || "").trim().toLowerCase(),
-      password: String(password || ""),
-      name: name ? String(name).trim() : undefined,
-      phone: phone ? String(phone).trim() : undefined,
-    }),
+    signup: (email, password, name, phone) => {
+      const e = String(email || "").trim().toLowerCase();
+      const p = String(password || "");
+      return onSupabase
+        ? sbAuth.signup(e, p, name, phone)
+        : authRequest("/api/auth/signup", {
+            email: e, password: p,
+            name: name ? String(name).trim() : undefined,
+            phone: phone ? String(phone).trim() : undefined,
+          });
+    },
 
-    login: (email, password) => authRequest("/api/auth/login", {
-      email: String(email || "").trim().toLowerCase(),
-      password: String(password || ""),
-    }),
+    login: (email, password) => {
+      const e = String(email || "").trim().toLowerCase();
+      const p = String(password || "");
+      return onSupabase
+        ? sbAuth.login(e, p)
+        : authRequest("/api/auth/login", { email: e, password: p });
+    },
 
     // Full-page trip to Google and back to this same page.
     loginWithGoogle: (redirectPath) => {
+      if (onSupabase) return sbAuth.loginWithGoogle(redirectPath);
       const back = redirectPath || (window.location.pathname + window.location.search);
       window.location.href = base + "/api/auth/google/start?redirect=" + encodeURIComponent(back);
     },
 
-    requestCode: (email, purpose) => request("/api/auth/request-code", {
-      method: "POST",
-      body: { email: String(email || "").trim().toLowerCase(), purpose: purpose || "login" },
-    }),
-    verify: (email, code) => authRequest("/api/auth/verify", {
-      email: String(email || "").trim().toLowerCase(),
-      code: String(code || "").trim(),
-    }),
+    requestCode: (email, purpose) => {
+      const e = String(email || "").trim().toLowerCase();
+      return onSupabase
+        ? sbAuth.requestCode(e)
+        : request("/api/auth/request-code", { method: "POST", body: { email: e, purpose: purpose || "login" } });
+    },
+    verify: (email, code) => {
+      const e = String(email || "").trim().toLowerCase();
+      const c = String(code || "").trim();
+      return onSupabase ? sbAuth.verify(e, c) : authRequest("/api/auth/verify", { email: e, code: c });
+    },
 
     // Sets or replaces the password for whoever is signed in right now. The
     // server rotates every session on a password change and hands back a fresh
     // token, so store it or the client is signed straight back out.
-    setPassword: (password) => authRequest("/api/auth/set-password", { password: String(password || "") }),
+    setPassword: (password) => {
+      const p = String(password || "");
+      return onSupabase
+        ? sbAuth.setPassword(p)
+        : authRequest("/api/auth/set-password", { password: p });
+    },
 
     me: () => request("/api/me"),
     updateMe: (fields) => request("/api/me", { method: "POST", body: fields }),
@@ -139,9 +320,11 @@ window.SP = (() => {
     // Tell the server to drop the session, then forget it locally either way.
     logout: async () => {
       if (getToken()) {
-        try { await request("/api/auth/logout", { method: "POST" }); } catch (e) { /* local sign-out still wins */ }
+        if (onSupabase) await sbAuth.logout();
+        else { try { await request("/api/auth/logout", { method: "POST" }); } catch (e) { /* local sign-out still wins */ } }
       }
       clearToken();
+      clearRefresh();
     },
   };
 })();
