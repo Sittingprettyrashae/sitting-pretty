@@ -1413,7 +1413,13 @@ async function handleApi(req, res, url) {
       // Nothing here verifies the address the way Google would, so this path
       // must never hand out the owner account. Without this, anyone who can
       // reach the demo could type her address and land in the dashboard.
-      if (ADMIN_EMAILS.includes(email)) {
+      // Nothing here verifies the address the way Google does, so by default
+      // this path must never hand out the owner account: anyone who could
+      // reach an exposed demo would land in her dashboard. The local demo
+      // binds to 127.0.0.1, so it can be opted in from server/.env.local
+      // (gitignored) to show her the real Google flow before her own Google
+      // credentials exist.
+      if (ADMIN_EMAILS.includes(email) && process.env.DEMO_ALLOW_OWNER_GOOGLE !== '1') {
         throw new ApiError(403,
           'The demo sign-in cannot be used for the owner account. Sign in with an email code instead.');
       }

@@ -533,8 +533,8 @@
       </div>`);
     body.appendChild(tabs);
 
-    const form = el(`<div></div>`);
-    form.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(S.email)}"></div>`));
+    const form = el(`<form novalidate></form>`);
+    form.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" name="username" autocomplete="username" placeholder="you@example.com" value="${esc(S.email)}"></div>`));
     form.appendChild(el(pwField("bkPw", "Password", signup ? "new" : "current")));
     if (signup) {
       form.appendChild(el(`<div class="field"><label for="bkName">Your name</label><input id="bkName" autocomplete="name" placeholder="First and last"></div>`));
@@ -575,7 +575,11 @@
       startCode(email, foot);
     });
 
-    go.addEventListener("click", async () => {
+    // Password managers only offer to save on a real form submit carrying a
+    // username and a password together. The button lives in the sheet footer,
+    // outside the form, so route it through requestSubmit rather than doing
+    // the work on click: otherwise she and her clients retype it every visit.
+    const doEmailAuth = async () => {
       if (go.disabled) return;
       const email = $("#bkEmail", body).value.trim().toLowerCase();
       const pw = $("#bkPw", body).value;
@@ -620,7 +624,13 @@
         }
         msg(foot, e.message, true); go.disabled = false;
       }
-    });
+    };
+
+    // Enter in either field submits, and the footer button asks the form to
+    // submit rather than bypassing it, so the browser sees a genuine sign-in
+    // and offers to remember it.
+    form.addEventListener("submit", (e) => { e.preventDefault(); doEmailAuth(); });
+    go.addEventListener("click", () => { if (!go.disabled) form.requestSubmit(); });
   }
 
   // Send the code, then swap the step over to the code form.
@@ -667,7 +677,7 @@
 
   function rWhoCode(body, foot) {
     body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || "We will email you a 6-digit code.")}</p>`));
-    body.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" autocomplete="email" value="${esc(S.email)}"></div>`));
+    body.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" name="username" autocomplete="username" value="${esc(S.email)}"></div>`));
     body.appendChild(el(`<div class="field"><label for="bkCode">6-digit code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456"></div>`));
     const links = el(`<p class="alt-links">
       <button type="button" data-alt="resend">Send it again</button><span aria-hidden="true">·</span>

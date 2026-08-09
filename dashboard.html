@@ -515,10 +515,10 @@ button.cal-day:hover{border-color:var(--rose)}
         <div class="or-line"><span>or</span></div>
         <form id="password-form">
           <label class="field-label" for="login-email">Email</label>
-          <input id="login-email" class="field" type="email" required autocomplete="email" placeholder="you@example.com">
+          <input id="login-email" class="field" type="email" name="username" required autocomplete="username" placeholder="you@example.com">
           <label class="field-label" for="login-password">Password</label>
           <div class="pw-wrap">
-            <input id="login-password" class="field" type="password" autocomplete="current-password" placeholder="Your password">
+            <input id="login-password" class="field" type="password" name="password" autocomplete="current-password" placeholder="Your password">
             <button type="button" class="pw-toggle" data-pw="login-password" aria-pressed="false" aria-label="Show password">Show</button>
           </div>
           <button id="password-submit" class="btn btn-solid btn-wide" type="submit">Sign in</button>
@@ -542,7 +542,7 @@ button.cal-day:hover{border-color:var(--rose)}
         <p class="login-note">Want one-tap sign in next time? Set a password. You can skip this.</p>
         <label class="field-label" for="new-password">New password</label>
         <div class="pw-wrap">
-          <input id="new-password" class="field" type="password" autocomplete="new-password" placeholder="At least 8 characters">
+          <input id="new-password" class="field" type="password" name="new-password" autocomplete="new-password" placeholder="At least 8 characters">
           <button type="button" class="pw-toggle" data-pw="new-password" aria-pressed="false" aria-label="Show password">Show</button>
         </div>
         <p class="field-hint" id="setpw-hint"></p>
