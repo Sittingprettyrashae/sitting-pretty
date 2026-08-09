@@ -11,10 +11,16 @@
   // Google is only usable once it is configured on her Supabase project. Until
   // then, hide the button and its divider so nobody taps into a JSON error.
   (function hideGoogleUntilReady() {
-    if (window.SP_CONFIG && window.SP_CONFIG.googleEnabled) return;
+    var ready = window.SP_CONFIG && window.SP_CONFIG.googleEnabled;
     document.addEventListener("DOMContentLoaded", function () {
+      var sub = $("login-sub");
+      if (ready) {
+        if (sub) sub.textContent = "Sign in with Google or your password. You stay signed in on this phone, so this is a one-time step.";
+        return;
+      }
       var g = $("google-btn"); if (g) g.hidden = true;
       var line = document.querySelector("#login-view .or-line"); if (line) line.hidden = true;
+      if (sub) sub.textContent = "Sign in with your email and password. You stay signed in on this phone, so this is a one-time step.";
     });
   })();
 
