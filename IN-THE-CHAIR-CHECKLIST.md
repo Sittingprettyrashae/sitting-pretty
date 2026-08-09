@@ -31,7 +31,16 @@ She signs up, with the address above. Her name, her email, her password, her mon
    **Rotate the secret key** while you are in there. It was sent in plaintext,
    so treat it as burned: Developers > API keys > roll it, then tell me the new
    one and I will swap it in.
-2. **Supabase** supabase.com — free tier. Create a project, any region near TX.
+2. **Supabase** — she is signed in (keeboniehill@gmail.com). Create a project
+   in HER account, any region near Texas, and save the database password it
+   shows you once. Then, still as her: account settings > Access Tokens >
+   generate one, and send it to me.
+
+   Careful: the Supabase CLI on your laptop is logged in as YOU (it lists
+   taylormade-studio, rosies-beauty-spa, runitup-dallas). Deploying from there
+   as-is would put her platform in your org. Do not `supabase login` to fix it,
+   that wipes your session for your other clients. Her access token in one
+   shell handles it.
 3. **Google Cloud** console.cloud.google.com — free. This is only so "Continue
    with Google" works on her booking page.
 

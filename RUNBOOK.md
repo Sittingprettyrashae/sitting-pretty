@@ -52,9 +52,24 @@ If Nelson needs dashboard access, she can invite him as a team member
 2. Run the schema. Either paste `supabase/schema.sql` into the dashboard SQL
    Editor and run it, or use the CLI as a migration:
 
+   **Whose account is the CLI on?** `supabase login` on the developer's machine
+   is almost certainly still HIS account, and linking there would put her
+   booking platform in his org, which is the whole thing this handoff exists to
+   avoid. Check with `supabase projects list`: if her project is not in it, you
+   are on the wrong account.
+
+   Do not run `supabase login` to fix it, because that replaces his session and
+   he has other clients in there. Have her generate an access token
+   (Supabase dashboard, account settings, Access Tokens) and scope it to just
+   these commands:
+
+   ```sh
+   export SUPABASE_ACCESS_TOKEN=sbp_...      # hers, this shell only
+   supabase projects list                     # should now show HER project
+   ```
+
    ```sh
    brew install supabase/tap/supabase        # or: npm i -g supabase
-   supabase login
    cd ~/sitting-pretty-site
    supabase link --project-ref YOUR-PROJECT-REF
    mkdir -p supabase/migrations
