@@ -1,7 +1,7 @@
 # Midjourney prompts — signature cards + hero imagery
 
-Seven images: five for the "The five she's known for" cards, two for the hero
-at the top of the page. Generate, then save each over its slot file (same
+Eight images: five for the "The five she's known for" cards, two for the hero
+at the top of the page, one banner for the waitlist popup. Generate, then save each over its slot file (same
 name, same place) and push; no code changes needed:
 
 | Slot | File to overwrite | Shape |
@@ -13,6 +13,7 @@ name, same place) and push; no code changes needed:
 | Sew-Ins card | `assets/signature/sewin.jpg` | 4:5 |
 | Hero, big portrait | `assets/hero/main.jpg` | 4:5, shown uncropped |
 | Hero, small polaroid | `assets/hero/back.jpg` | square 1:1 |
+| Waitlist popup banner | `assets/popup.jpg` | wide, generate 21:9 |
 
 The slots currently hold stand-in photos, so nothing is broken while you work.
 These images are ambiance for the category cards; her real client work stays in
@@ -126,6 +127,21 @@ editorial beauty photograph of a Black woman with warm brown skin seen from behi
 If the braids feel repetitive next to the knotless card, swap the subject
 words for "silk-pressed hair" or "body-wave sew-in curls" and keep everything
 else identical.
+
+## The popup banner
+
+**8. Waitlist popup — `assets/popup.jpg`**
+
+A wide strip across the top of the "Hear about it when a seat opens up"
+popup, shown about 400 x 120 (an interim image holds the slot until yours
+lands). The popup's message is "a seat opens up", so the image IS the seat:
+her kind of chair, empty and waiting, no people. Generate at `--ar 21:9` and
+keep the chair in the vertical middle of the frame: the slot crops some off
+the top and bottom.
+
+```
+editorial interior photograph of a single elegant salon styling chair in a bright feminine beauty studio, empty chair waiting for its next client, warm ivory walls with soft rosewater pink tones, a large round mirror with warm glowing light, gold accents, fresh flowers on the styling station, soft diffused window light with champagne highlights, glossy high-end salon campaign photography, wide cinematic composition with the chair centered in the vertical middle of the frame, shallow depth of field --ar 21:9 --style raw --s 120 --no people, faces, text, watermark, clutter
+```
 
 ## Check them before you push
 

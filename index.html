@@ -237,6 +237,12 @@ h2{
   transition:opacity .4s var(--ease-out), transform .4s var(--ease-out);
 }
 .leadpop.show{opacity:1;transform:translateY(0);pointer-events:auto}
+.leadpop .lp-img{
+  width:calc(100% + 3rem);margin:-1.5rem -1.5rem 1rem;height:120px;
+  object-fit:cover;object-position:center 30%;border-radius:1.3rem 1.3rem 0 0;
+}
+/* A short phone can't spare the height; the words carry the popup fine. */
+@media (max-height:700px){.leadpop .lp-img{display:none}}
 .leadpop .lp-kicker{font-family:var(--font-script);color:var(--rose);font-size:1.15rem}
 .leadpop h3{font-size:1.25rem;font-weight:900;letter-spacing:-.015em;margin-top:.15rem;text-wrap:balance}
 .leadpop .lp-sub{color:var(--ink-dim);font-size:.92rem;margin-top:.45rem;line-height:1.5}
@@ -247,7 +253,7 @@ h2{
 .leadpop .lp-fine{font-size:.76rem;color:var(--ink-faint);margin-top:.65rem;text-align:center}
 .leadpop .lp-close{
   position:absolute;top:.5rem;right:.5rem;width:44px;height:44px;border-radius:50%;
-  border:none;background:none;color:var(--ink-faint);font-size:1.25rem;cursor:pointer;
+  border:none;background:oklch(99% 0.005 80 / .85);color:var(--ink-dim);font-size:1.25rem;cursor:pointer;
   display:grid;place-items:center;font-family:inherit;
   transition:background .18s var(--ease-out), color .18s var(--ease-out);
 }
@@ -804,6 +810,9 @@ dialog[open] .sheet{transform:translateY(0)}
 <div class="leadpop" id="leadPop" role="dialog" aria-labelledby="lpTitle" aria-live="polite" hidden>
   <button type="button" class="lp-close" id="lpClose" aria-label="No thanks, close this">&#215;</button>
   <div id="lpBody">
+    <!-- Popup banner slot: overwrite assets/popup.jpg and push, no code
+         change (prompt in MIDJOURNEY-PROMPTS.md). Shown 400x120, wide crop. -->
+    <img class="lp-img" src="assets/popup.jpg" alt="" aria-hidden="true">
     <p class="lp-kicker">Sitting Pretty</p>
     <h3 id="lpTitle">Hear about it when a seat opens up</h3>
     <p class="lp-sub">Ebony&rsquo;s book fills fast. Leave your name and she can let you know when seats open up or something new drops.</p>
