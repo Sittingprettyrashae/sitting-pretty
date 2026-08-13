@@ -142,11 +142,15 @@ in the vertical middle of the frame: the slot crops some off the top and
 bottom.
 
 ```
-editorial beauty campaign photograph of three Black women standing side by side, one with deep espresso skin and long medium knotless braids with gold cuffs, one with golden caramel skin and a big voluminous curly lace frontal install, one with rich mahogany-brown skin and a sleek chin-length glossy bob, each posing like a hair model with a hand in her hair, warm ivory seamless studio backdrop with subtle rosewater pink tones, soft diffused beauty-dish lighting with champagne highlights, glossy high-end salon campaign photography, wide cinematic group composition, all three faces in the vertical middle of the frame, complete hairstyles visible, nothing cropped at the edges --ar 21:9 --style raw --s 120 --no salon interior, chairs, furniture, extreme close-up, cropped hair, deformed hands, extra fingers, text, watermark
+editorial beauty campaign photograph of three Black women with three clearly different complexions standing side by side with space between them, the first with very deep dark espresso skin wearing a soft rose-pink top, long medium knotless braids with gold cuffs, the second with medium warm brown skin wearing a deep plum sweater, a big voluminous curly lace frontal install, the third with light golden honey skin wearing a black turtleneck, a sleek chin-length glossy bob, their skin tones visibly distinct from one another, each posing like a hair model with a hand in her hair, waist-up group shot photographed from a distance with the camera pulled back, complete hairstyles visible from crown to ends with clear space above their heads, warm ivory seamless studio backdrop with subtle rosewater tones, their clothing standing out clearly against the backdrop, soft diffused beauty-dish lighting with champagne highlights, glossy high-end salon campaign photography, wide cinematic group composition, faces in the vertical middle of the frame --ar 21:9 --style raw --s 120 --no salon interior, chairs, furniture, extreme close-up, tight crop on faces, faces filling the frame, cropped hair, monochrome outfits, brown clothing, beige clothing, deformed hands, extra fingers, text, watermark
 ```
 
-Group shots multiply the failure points (six hands, three faces), so
-re-roll freely and check hands and faces at full size before shipping.
+Group shots multiply the failure points (six hands, three faces), and
+Midjourney loves to (a) zoom into faces, (b) render everyone the same
+mid-brown, and (c) dress the group in backdrop colors so the whole image
+mushes together. The wardrobe colors (rose pink, plum, black), the named
+distinct complexions, and the waist-up distance framing all exist to fight
+exactly that. Re-roll freely and check shades, hands, and crop at full size.
 
 ## Check them before you push
 
