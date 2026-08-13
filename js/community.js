@@ -46,98 +46,54 @@
   }
 
   // ---------- waitlist popup ----------
-  // One quiet card, once. Never for signed-in clients (they are already on
-  // her list), never twice after a signup, and a dismissal snoozes it for a
-  // week. It also stays out of the way while the booking sheet is open:
-  // someone mid-booking is doing the more valuable thing.
+  // A centered card that opens on every visit, as soon as the page loads.
+  // It still never shows to a signed-in client (they are already on her
+  // list) or to anyone who already submitted it, and it waits for the
+  // reviews call to succeed so it can only appear where submitting works.
   const DONE_KEY = "sp_lead_done";
-  const SNOOZE_KEY = "sp_lead_snooze";
-  const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
 
   const pop = $("#leadPop");
+  const scrim = $("#lpScrim");
   if (!pop) return void loadReviews();
-  let shown = false;
-  let armed = false;
 
   function eligible() {
-    if (shown || store.get(DONE_KEY)) return false;
-    const snooze = Number(store.get(SNOOZE_KEY) || 0);
-    if (snooze && Date.now() - snooze < SNOOZE_MS) return false;
+    if (store.get(DONE_KEY)) return false;
     if (window.SP && SP.hasToken()) return false;
     return true;
   }
 
   function show() {
-    if (!eligible() || inQuietZone) return;
+    if (!eligible()) return;
     const sheet = document.getElementById("sheet");
     if (sheet && sheet.open) {
-      // Wait for the sheet to close, then a beat, then try again.
-      sheet.addEventListener("close", () => setTimeout(show, 1600), { once: true });
+      // Deep link straight into booking: wait for the sheet to close first.
+      sheet.addEventListener("close", () => setTimeout(show, 900), { once: true });
       return;
     }
-    shown = true;
     pop.hidden = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => pop.classList.add("show")));
+    if (scrim) scrim.hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      pop.classList.add("show");
+      if (scrim) scrim.classList.add("show");
+    }));
   }
 
-  function dismiss() {
-    store.set(SNOOZE_KEY, String(Date.now()));
-    hide();
-  }
   function hide() {
     pop.classList.remove("show");
-    setTimeout(() => { pop.hidden = true; }, 420);
+    if (scrim) scrim.classList.remove("show");
+    setTimeout(() => { pop.hidden = true; if (scrim) scrim.hidden = true; }, 380);
   }
 
-  // Quiet zones: sections whose own call to action the popup must never sit on
-  // top of. Watched by element, not by scroll percentage, because the page
-  // length changes as reviews are added and a percentage silently drifts onto
-  // whatever moved there.
-  const QUIET = ["#reviews", ".cta"];
-  let inQuietZone = false;
-  (function watchQuietZones() {
-    if (typeof IntersectionObserver !== "function") return;
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(e => { e.target.__vis = e.isIntersecting; });
-      inQuietZone = QUIET.some(sel => {
-        const el = document.querySelector(sel);
-        return el && el.__vis;
-      });
-      // Already open and a quiet zone just scrolled in: step aside. hide(),
-      // not dismiss(), because scrolling past is not a no.
-      if (inQuietZone && !pop.hidden && pop.classList.contains("show") &&
-          !pop.contains(document.activeElement)) hide();
-    }, { threshold: 0.12 });
-    QUIET.forEach(sel => { const el = document.querySelector(sel); if (el) io.observe(el); });
-  })();
-
-  function arm() {
-    if (armed || !eligible()) return;
-    armed = true;
-    const t = setTimeout(show, 14000);
-    const onScroll = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      const at = max > 0 ? window.scrollY / max : 0;
-      if (at > 0.35 && !inQuietZone) {
-        clearTimeout(t);
-        window.removeEventListener("scroll", onScroll);
-        show();
-      }
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-  }
-
-  $("#lpClose").addEventListener("click", dismiss);
+  $("#lpClose").addEventListener("click", hide);
+  if (scrim) scrim.addEventListener("click", hide);
   document.addEventListener("keydown", (e) => {
-    // The booking sheet opens OVER the popup; Escape there closes the sheet,
-    // and must not silently snooze a signup the visitor was mid-typing.
     const sheet = document.getElementById("sheet");
     if (sheet && sheet.open) return;
-    if (e.key === "Escape" && !pop.hidden && pop.classList.contains("show")) dismiss();
+    if (e.key === "Escape" && !pop.hidden && pop.classList.contains("show")) hide();
   });
 
   $("#lpForm").addEventListener("submit", async (e) => {
@@ -189,7 +145,8 @@
   function bootOnce() {
     if (booted) return;
     booted = true;
-    loadReviews().then((apiOk) => { if (apiOk) arm(); });
+    // A beat after load so the page paints first, then the popup takes center.
+    loadReviews().then((apiOk) => { if (apiOk) setTimeout(show, 700); });
   }
   document.addEventListener("DOMContentLoaded", bootOnce);
   if (document.readyState !== "loading") bootOnce();

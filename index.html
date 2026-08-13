@@ -228,21 +228,31 @@ h2{
   padding:2rem 1.6rem;text-align:center;color:var(--ink-dim);max-width:52ch;margin-inline:auto;
 }
 
-/* ---------- lead popup ---------- */
+/* ---------- lead popup (centered, opens on load) ---------- */
+.lp-scrim{
+  position:fixed;inset:0;z-index:105;background:oklch(25% 0.04 350 / .38);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  opacity:0;pointer-events:none;transition:opacity .35s var(--ease-out);
+}
+.lp-scrim.show{opacity:1;pointer-events:auto}
 .leadpop{
-  position:fixed;z-index:110;right:1rem;bottom:1rem;width:min(400px,calc(100vw - 2rem));
+  position:fixed;z-index:110;left:50%;top:50%;width:min(420px,calc(100vw - 2rem));
+  max-height:calc(100svh - 2rem);overflow-y:auto;
   background:var(--surface);border:1px solid var(--line);border-radius:1.3rem;
   box-shadow:var(--shadow-lift);padding:1.5rem 1.5rem 1.3rem;
-  opacity:0;transform:translateY(24px);pointer-events:none;
-  transition:opacity .4s var(--ease-out), transform .4s var(--ease-out);
+  opacity:0;transform:translate(-50%,-46%) scale(.97);pointer-events:none;
+  transition:opacity .35s var(--ease-out), transform .35s var(--ease-out);
 }
-.leadpop.show{opacity:1;transform:translateY(0);pointer-events:auto}
+.leadpop.show{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto}
 .leadpop .lp-img{
-  width:calc(100% + 3rem);margin:-1.5rem -1.5rem 1rem;height:120px;
+  /* The global img rule caps max-width at the content box, which left a bare
+     strip on the right; lift the cap so the banner truly bleeds edge to edge. */
+  width:calc(100% + 3rem);max-width:none;margin:-1.5rem -1.5rem 1rem;height:150px;
   object-fit:cover;object-position:center 30%;border-radius:1.3rem 1.3rem 0 0;
 }
 /* A short phone can't spare the height; the words carry the popup fine. */
-@media (max-height:700px){.leadpop .lp-img{display:none}}
+@media (max-height:700px){.leadpop .lp-img{height:110px}}
+@media (max-height:560px){.leadpop .lp-img{display:none}}
 .leadpop .lp-kicker{font-family:var(--font-script);color:var(--rose);font-size:1.15rem}
 .leadpop h3{font-size:1.25rem;font-weight:900;letter-spacing:-.015em;margin-top:.15rem;text-wrap:balance}
 .leadpop .lp-sub{color:var(--ink-dim);font-size:.92rem;margin-top:.45rem;line-height:1.5}
@@ -264,9 +274,7 @@ h2{
   width:52px;height:52px;border-radius:50%;background:var(--rose-soft);color:var(--rose-deep);
   display:grid;place-items:center;font-size:1.4rem;margin:0 auto .7rem;
 }
-@media (max-width:560px){
-  .leadpop{right:.6rem;left:.6rem;bottom:.6rem;width:auto}
-}
+
 @media (prefers-reduced-motion: reduce){.leadpop{transition:none}}
 
 /* ---------- gallery ---------- */
@@ -806,8 +814,10 @@ dialog[open] .sheet{transform:translateY(0)}
 
 <div class="demo-ribbon" id="demoRibbon">Demo mode &middot; payments simulated</div>
 
-<!-- Waitlist popup: shows once, politely, and never to signed-in clients. -->
-<div class="leadpop" id="leadPop" role="dialog" aria-labelledby="lpTitle" aria-live="polite" hidden>
+<!-- Waitlist popup: opens centered on every visit; never for signed-in
+     clients or anyone already on the list. -->
+<div class="lp-scrim" id="lpScrim" hidden></div>
+<div class="leadpop" id="leadPop" role="dialog" aria-modal="true" aria-labelledby="lpTitle" hidden>
   <button type="button" class="lp-close" id="lpClose" aria-label="No thanks, close this">&#215;</button>
   <div id="lpBody">
     <!-- Popup banner slot: overwrite assets/popup.jpg and push, no code
