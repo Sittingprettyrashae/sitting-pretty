@@ -1821,7 +1821,7 @@ async function handleApi(req, res, url) {
       .filter((r) => r.status === 'approved')
       .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
       .slice(0, 60)
-      .map((r) => ({ name: shortName(r.name), service: r.service, rating: r.rating, body: r.body, ts: r.ts }));
+      .map((r) => ({ name: shortName(r.name), service: r.service, rating: r.rating, body: r.body, source: r.source || 'site', ts: r.ts }));
     return sendJson(res, 200, { reviews, count: reviews.length });
   }
 
@@ -1841,7 +1841,7 @@ async function handleApi(req, res, url) {
     const existing = db.reviews.find((r) => r.client_id === client.id);
     const fields = {
       name: client.name || client.email.split('@')[0],
-      service, rating, body: text, status: 'pending',
+      service, rating, body: text, status: 'pending', source: 'site',
       ts: new Date().toISOString()
     };
     if (existing) Object.assign(existing, fields);
@@ -2009,7 +2009,7 @@ async function handleApi(req, res, url) {
     const reviews = db.reviews.slice()
       .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
       .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1))
-      .map((r) => ({ id: r.id, name: r.name, service: r.service, rating: r.rating, body: r.body, status: r.status, ts: r.ts }));
+      .map((r) => ({ id: r.id, name: r.name, service: r.service, rating: r.rating, body: r.body, status: r.status, source: r.source || 'site', ts: r.ts }));
     return sendJson(res, 200, { reviews });
   }
 
@@ -2025,7 +2025,7 @@ async function handleApi(req, res, url) {
     review.status = status;
     save();
     return sendJson(res, 200, {
-      review: { id: review.id, name: review.name, service: review.service, rating: review.rating, body: review.body, status: review.status, ts: review.ts }
+      review: { id: review.id, name: review.name, service: review.service, rating: review.rating, body: review.body, status: review.status, source: review.source || 'site', ts: review.ts }
     });
   }
 

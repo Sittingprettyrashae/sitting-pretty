@@ -182,9 +182,11 @@ Payment effects:
   429), a honeypot field (`company` — any non-empty value gets `{ok:true}`
   and no row), and a duplicate email answers exactly like a fresh one so the
   list can't be probed.
-- `GET /api/reviews` → `{reviews:[{name,service,rating,body,ts}], count}` —
-  APPROVED reviews only, newest first, max 60. `name` is shortened to first
-  name + last initial ("Tasha R."); the full name stays admin-only.
+- `GET /api/reviews` → `{reviews:[{name,service,rating,body,source,ts}], count}`
+  — APPROVED reviews only, newest first, max 60. `name` is shortened to first
+  name + last initial ("Tasha R."); the full name stays admin-only. `source`
+  is `site` (written here) or `styleseat` (imported verbatim from her
+  StyleSeat profile), and the wall labels the imported ones "via StyleSeat".
 - `POST /api/reviews` `{rating:1-5, body, service?}` (auth) → `{ok:true}` —
   signed-in clients only. The display name is snapshotted from the profile
   server-side. ONE review per client, the latest wins, and every save (new or

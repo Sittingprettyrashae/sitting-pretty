@@ -1035,7 +1035,7 @@
       row += '<span class="rv-stars" aria-label="' + esc(String(r.rating)) + ' out of 5 stars">' + stars(r.rating) + "</span>";
       row += '<span class="chip ' + meta.chip + '">' + meta.label + "</span></div>";
       row += '<p class="rv-body">' + escBr(r.body) + "</p>";
-      row += '<p class="rv-who"><b>' + esc(r.name) + "</b>" + (r.service ? " &middot; " + esc(r.service) : "") + (r.ts ? " &middot; " + esc(fmtTs(r.ts)) : "") + "</p>";
+      row += '<p class="rv-who"><b>' + esc(r.name) + "</b>" + (r.service ? " &middot; " + esc(r.service) : "") + (r.ts ? " &middot; " + esc(fmtTs(r.ts)) : "") + (r.source === "styleseat" ? ' &middot; <strong>from StyleSeat</strong>' : "") + "</p>";
       row += '<div class="rv-actions">';
       if (r.status !== "approved") row += '<button class="btn btn-solid btn-sm" type="button" data-review="' + esc(r.id) + '" data-set="approved">Put it on the site</button>';
       if (r.status !== "hidden") row += '<button class="btn btn-ghost btn-sm" type="button" data-review="' + esc(r.id) + '" data-set="hidden">' + (r.status === "approved" ? "Take it down" : "Hide it") + "</button>";

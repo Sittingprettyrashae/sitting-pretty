@@ -889,6 +889,12 @@ create table if not exists public.reviews (
 create unique index if not exists reviews_client_key
   on public.reviews (client_id);
 
+-- Where a review came from. 'site' = written by a signed-in client here.
+-- 'styleseat' = imported verbatim from her StyleSeat profile, which the wall
+-- labels as such so nobody is misled about where the words were written.
+alter table public.reviews
+  add column if not exists source text not null default 'site';
+
 alter table public.reviews enable row level security;
 
 -- NO policies, not even a read for approved rows. A row-level policy cannot

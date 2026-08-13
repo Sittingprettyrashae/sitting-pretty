@@ -92,7 +92,7 @@ function publicName(full: string): string {
 export async function handleListReviews(): Promise<Response> {
   const res = await adminDb()
     .from("reviews")
-    .select("name, service, rating, body, created_at")
+    .select("name, service, rating, body, source, created_at")
     .eq("status", "approved")
     .order("created_at", { ascending: false })
     .limit(60);
@@ -102,6 +102,9 @@ export async function handleListReviews(): Promise<Response> {
     service: r.service,
     rating: r.rating,
     body: r.body,
+    // Imported reviews are labelled on the wall, so nobody is misled about
+    // where the words were originally written.
+    source: r.source,
     ts: r.created_at,
   }));
   return json({ reviews, count: reviews.length });

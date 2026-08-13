@@ -39,7 +39,7 @@
       <figure class="rev-card">
         <span class="stars" aria-label="${Math.max(1, Math.min(5, r.rating))} out of 5 stars">${stars(r.rating)}</span>
         <blockquote>${esc(r.body)}</blockquote>
-        <figcaption class="who"><b>${esc(r.name)}</b>${r.service ? " · " + esc(r.service) : ""}</figcaption>
+        <figcaption class="who"><b>${esc(r.name)}</b>${r.service ? " · " + esc(r.service) : ""}${r.source === "styleseat" ? ' <span class="via">via StyleSeat</span>' : ""}</figcaption>
       </figure>`).join("");
     grid.hidden = false;
     return true;
@@ -72,7 +72,7 @@
   }
 
   function show() {
-    if (!eligible()) return;
+    if (!eligible() || inQuietZone) return;
     const sheet = document.getElementById("sheet");
     if (sheet && sheet.open) {
       // Wait for the sheet to close, then a beat, then try again.
@@ -93,6 +93,28 @@
     setTimeout(() => { pop.hidden = true; }, 420);
   }
 
+  // Quiet zones: sections whose own call to action the popup must never sit on
+  // top of. Watched by element, not by scroll percentage, because the page
+  // length changes as reviews are added and a percentage silently drifts onto
+  // whatever moved there.
+  const QUIET = ["#reviews", ".cta"];
+  let inQuietZone = false;
+  (function watchQuietZones() {
+    if (typeof IntersectionObserver !== "function") return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { e.target.__vis = e.isIntersecting; });
+      inQuietZone = QUIET.some(sel => {
+        const el = document.querySelector(sel);
+        return el && el.__vis;
+      });
+      // Already open and a quiet zone just scrolled in: step aside. hide(),
+      // not dismiss(), because scrolling past is not a no.
+      if (inQuietZone && !pop.hidden && pop.classList.contains("show") &&
+          !pop.contains(document.activeElement)) hide();
+    }, { threshold: 0.12 });
+    QUIET.forEach(sel => { const el = document.querySelector(sel); if (el) io.observe(el); });
+  })();
+
   function arm() {
     if (armed || !eligible()) return;
     armed = true;
@@ -100,9 +122,7 @@
     const onScroll = () => {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const at = max > 0 ? window.scrollY / max : 0;
-      // Between 40% and the bottom zone where it would cover the reviews ask
-      // or the final call to action.
-      if (at > 0.4 && at < 0.7) {
+      if (at > 0.35 && !inQuietZone) {
         clearTimeout(t);
         window.removeEventListener("scroll", onScroll);
         show();
@@ -119,16 +139,6 @@
     if (sheet && sheet.open) return;
     if (e.key === "Escape" && !pop.hidden && pop.classList.contains("show")) dismiss();
   });
-
-  // The bottom of the page is where the reviews ask and the final Book button
-  // live; the popup gets out of their way instead of sitting on top of them.
-  // hide(), not dismiss(): scrolling past is not a no.
-  window.addEventListener("scroll", () => {
-    if (pop.hidden || !pop.classList.contains("show")) return;
-    if (pop.contains(document.activeElement)) return; // they are typing in it
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    if (max > 0 && window.scrollY / max > 0.72) hide();
-  }, { passive: true });
 
   $("#lpForm").addEventListener("submit", async (e) => {
     e.preventDefault();

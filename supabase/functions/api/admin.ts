@@ -308,7 +308,7 @@ async function removeLead(leadId: string): Promise<Response> {
 async function listReviews(): Promise<Response> {
   const res = await adminDb()
     .from("reviews")
-    .select("id, name, service, rating, body, status, created_at")
+    .select("id, name, service, rating, body, status, source, created_at")
     .order("status", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(300);
@@ -320,6 +320,7 @@ async function listReviews(): Promise<Response> {
     rating: r.rating,
     body: r.body,
     status: r.status,
+    source: r.source,
     ts: r.created_at,
   }));
   return json({ reviews: rows });
@@ -336,7 +337,7 @@ async function setReviewStatus(req: Request, reviewId: string): Promise<Response
     .from("reviews")
     .update({ status })
     .eq("id", reviewId)
-    .select("id, name, service, rating, body, status, created_at")
+    .select("id, name, service, rating, body, status, source, created_at")
     .maybeSingle();
   if (res.error) throw new HttpError(500, "Could not update that review");
   if (!res.data) throw new HttpError(404, "Review not found");
@@ -349,6 +350,7 @@ async function setReviewStatus(req: Request, reviewId: string): Promise<Response
       rating: r.rating,
       body: r.body,
       status: r.status,
+      source: r.source,
       ts: r.created_at,
     },
   });
