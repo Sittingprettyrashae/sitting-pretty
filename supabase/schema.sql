@@ -832,6 +832,36 @@ create policy hours_public_read on public.hours
 -- Only the service role reads or writes them.
 
 -- ---------------------------------------------------------------------------
+-- services: HER MENU, editable from the dashboard (Menu tab), so she never
+-- touches this database directly. services-data.js is only the seed now: the
+-- edge function reads this table first and falls back to the static file
+-- only when the table is empty or unreachable.
+--
+-- service_id is the stable slug bookings reference; editing a name or price
+-- never changes it, so existing bookings and holds keep pointing at the row.
+-- "Removing" a style sets active=false (soft), so her history still resolves
+-- and she can bring a style back in one tap.
+-- ---------------------------------------------------------------------------
+create table if not exists public.services (
+  id uuid primary key default gen_random_uuid(),
+  service_id text not null unique,
+  cat text not null,
+  name text not null,
+  price text not null,
+  duration_min integer not null check (duration_min > 0),
+  deposit_cents integer check (deposit_cents is null or deposit_cents > 0),
+  note text not null default '',
+  active boolean not null default true,
+  cat_order integer not null default 0,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table public.services enable row level security;
+-- No policies: the public reads the menu through GET /api/services (edge
+-- function, service role), and every write goes through the admin endpoints.
+
+-- ---------------------------------------------------------------------------
 -- leads: people who are not clients yet. The popup on the public site feeds
 -- this table so Ebony has a marketing list beyond the people who already
 -- booked. Written by POST /api/leads (edge function, service role) after

@@ -145,7 +145,42 @@ function buildCatalog() {
   return { categories, byId };
 }
 
-const catalog = buildCatalog();
+const seedCatalog = buildCatalog();
+
+// The live menu: db.services is what she edits from the dashboard's Menu tab,
+// seeded once from services-data.js. Everything that used to read the static
+// catalog now reads this, so her price edits show up in the same second.
+function seedServiceRows() {
+  const rows = [];
+  seedCatalog.categories.forEach((group, catIdx) => {
+    group.items.forEach((it, i) => {
+      rows.push({
+        service_id: it.service_id, cat: group.cat, name: it.name, price: it.price,
+        duration_min: it.duration_min || 30, deposit_cents: it.deposit_cents,
+        note: it.note || '', active: true, cat_order: catIdx, sort_order: i
+      });
+    });
+  });
+  return rows;
+}
+
+function liveCatalog() {
+  const rows = (db.services || []).filter((r) => r.active)
+    .slice().sort((a, b) => (a.cat_order - b.cat_order) || (a.sort_order - b.sort_order));
+  const categories = [];
+  const byCat = new Map();
+  const byId = new Map();
+  for (const r of rows) {
+    if (!byCat.has(r.cat)) { byCat.set(r.cat, []); categories.push({ cat: r.cat, items: byCat.get(r.cat) }); }
+    const item = {
+      service_id: r.service_id, name: r.name, price: r.price,
+      duration_min: r.duration_min, deposit_cents: r.deposit_cents, note: r.note
+    };
+    byCat.get(r.cat).push(item);
+    byId.set(r.service_id, item);
+  }
+  return { categories, byId };
+}
 
 /* ---------------- time helpers (America/Chicago) --------------------------- */
 
@@ -343,7 +378,7 @@ function defaultDb() {
   return {
     clients: [], bookings: [], sessions: {}, codes: {}, oauth_states: {},
     checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [], holds: [],
-    leads: [], reviews: [],
+    leads: [], reviews: [], services: seedServiceRows(),
     hours: defaultHours(), seq: {}
   };
 }
@@ -360,6 +395,8 @@ function normalizeDb() {
   if (!Array.isArray(db.holds)) db.holds = [];
   if (!Array.isArray(db.blocked_days)) db.blocked_days = [];
   if (!Array.isArray(db.leads)) db.leads = [];
+  // A db.json from before the menu was editable gets the seeded menu.
+  if (!Array.isArray(db.services) || !db.services.length) db.services = seedServiceRows();
   if (!Array.isArray(db.reviews)) db.reviews = [];
   if (!Array.isArray(db.outbox)) db.outbox = [];
   if (!db.checkout_sessions) db.checkout_sessions = {};
@@ -442,7 +479,7 @@ function seedDemo() {
   }
 
   const seedBooking = (client, cat, name, date, time, status, extra) => {
-    const svc = catalog.byId.get(slugify(cat + '--' + name));
+    const svc = liveCatalog().byId.get(slugify(cat + '--' + name));
     if (!svc) return null;
     const b = {
       id: nextId('bk'),
@@ -1259,6 +1296,43 @@ function cleanStr(v, max) {
   return v.trim().slice(0, max || 200);
 }
 
+// Menu-edit field validation, mirroring production (admin.ts).
+function cleanServiceFields(body) {
+  const out = {};
+  if (body.price !== undefined) {
+    const price = String(body.price).trim().replace(/\s+/g, '');
+    const normalized = price.startsWith('$') ? price : '$' + price;
+    if (!/^\$\d+\+?$/.test(normalized)) {
+      throw new ApiError(400, 'Price should look like "$75" or "$50+" (the + means "and up").');
+    }
+    out.price = normalized;
+  }
+  if (body.duration_min !== undefined) {
+    const d = Number(body.duration_min);
+    if (!Number.isInteger(d) || d < 15 || d > 720) {
+      throw new ApiError(400, 'How long it takes should be between 15 minutes and 12 hours.');
+    }
+    out.duration_min = d;
+  }
+  if (body.deposit_cents !== undefined) {
+    if (body.deposit_cents === null || body.deposit_cents === '') out.deposit_cents = null;
+    else {
+      const c = Number(body.deposit_cents);
+      if (!Number.isInteger(c) || c <= 0 || c > 100000000) {
+        throw new ApiError(400, 'The deposit should be a dollar amount, or empty for none.');
+      }
+      out.deposit_cents = c;
+    }
+  }
+  if (body.note !== undefined) out.note = cleanStr(body.note, 300);
+  if (body.name !== undefined) {
+    const name = cleanStr(body.name, 120);
+    if (name.length < 2) throw new ApiError(400, 'Give the style a name.');
+    out.name = name;
+  }
+  return out;
+}
+
 // Per-IP throttle on the one public write, mirroring production (community.ts).
 const leadBucket = new Map();
 function throttleLead(req) {
@@ -1535,7 +1609,7 @@ async function handleApi(req, res, url) {
 
   /* -- services and availability -- */
   if (method === 'GET' && p === '/api/services') {
-    return sendJson(res, 200, { categories: catalog.categories });
+    return sendJson(res, 200, { categories: liveCatalog().categories });
   }
 
   // Public hours: the same record the booking engine reads, so the hours shown
@@ -1547,7 +1621,7 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && p === '/api/availability') {
     const serviceId = url.searchParams.get('service_id') || '';
     const date = url.searchParams.get('date') || '';
-    const svc = catalog.byId.get(serviceId);
+    const svc = liveCatalog().byId.get(serviceId);
     if (!svc) throw new ApiError(404, 'Unknown service');
     if (!isValidDate(date)) throw new ApiError(400, 'Date must be YYYY-MM-DD');
     return sendJson(res, 200, availability(svc, date));
@@ -1557,7 +1631,7 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && p === '/api/bookings') {
     const client = requireAuth(req);
     const body = await readBody(req);
-    const svc = catalog.byId.get(cleanStr(body.service_id, 120));
+    const svc = liveCatalog().byId.get(cleanStr(body.service_id, 120));
     if (!svc) throw new ApiError(404, 'Unknown service');
     const date = cleanStr(body.date, 10);
     const time = cleanStr(body.time, 5);
@@ -1981,6 +2055,67 @@ async function handleApi(req, res, url) {
       return { id: c.id, email: c.email, name: c.name, phone: c.phone, bookings_count: theirs.length, last_booking: last };
     });
     return sendJson(res, 200, { clients });
+  }
+
+  /* -- her menu (dashboard Menu tab) -- */
+  if (method === 'GET' && p === '/api/admin/services') {
+    requireAdmin(req);
+    const services = (db.services || []).slice()
+      .sort((a, b) => (a.cat_order - b.cat_order) || (a.sort_order - b.sort_order));
+    return sendJson(res, 200, { services });
+  }
+
+  if (method === 'POST' && p === '/api/admin/services') {
+    requireAdmin(req);
+    const body = await readBody(req);
+    const cat = cleanStr(body.cat, 80);
+    if (cat.length < 2) throw new ApiError(400, 'Pick or type a category for this style.');
+    const fields = cleanServiceFields(body);
+    if (!fields.name) throw new ApiError(400, 'Give the style a name.');
+    if (!fields.price) throw new ApiError(400, 'Give the style a price.');
+    if (fields.duration_min === undefined) throw new ApiError(400, 'Say how long this style takes.');
+    const serviceId = slugify(cat + '--' + fields.name);
+    const existing = db.services.find((r) => r.service_id === serviceId);
+    if (existing && existing.active) {
+      throw new ApiError(409, 'That style already exists in this category. Edit it instead.');
+    }
+    const catRows = db.services.filter((r) => r.cat === cat);
+    const catOrder = catRows.length
+      ? catRows[0].cat_order
+      : Math.max(-1, ...db.services.map((r) => r.cat_order)) + 1;
+    const sortOrder = Math.max(-1, ...catRows.map((r) => r.sort_order)) + 1;
+    const row = {
+      service_id: serviceId, cat, name: fields.name, price: fields.price,
+      duration_min: fields.duration_min,
+      deposit_cents: fields.deposit_cents === undefined ? null : fields.deposit_cents,
+      note: fields.note || '', active: true, cat_order: catOrder, sort_order: sortOrder
+    };
+    if (existing) Object.assign(existing, row);
+    else db.services.push(row);
+    save();
+    return sendJson(res, 200, { service: existing || row });
+  }
+
+  if (method === 'PUT' && (m = /^\/api\/admin\/services\/([a-z0-9-]+)$/.exec(p))) {
+    requireAdmin(req);
+    const fields = cleanServiceFields(await readBody(req));
+    if (!Object.keys(fields).length) throw new ApiError(400, 'Nothing to change.');
+    const row = db.services.find((r) => r.service_id === m[1]);
+    if (!row) throw new ApiError(404, 'That style is not on the menu');
+    Object.assign(row, fields);
+    save();
+    return sendJson(res, 200, { service: row });
+  }
+
+  if (method === 'POST' && (m = /^\/api\/admin\/services\/([a-z0-9-]+)\/active$/.exec(p))) {
+    requireAdmin(req);
+    const body = await readBody(req);
+    if (typeof body.active !== 'boolean') throw new ApiError(400, 'active must be true or false');
+    const row = db.services.find((r) => r.service_id === m[1]);
+    if (!row) throw new ApiError(404, 'That style is not on the menu');
+    row.active = body.active;
+    save();
+    return sendJson(res, 200, { service: row });
   }
 
   // Her waitlist, newest first.

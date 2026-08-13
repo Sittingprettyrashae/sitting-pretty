@@ -14,7 +14,7 @@
 // closes stops being offered here the moment she saves it.
 
 import { requireClient } from "../_shared/auth.ts";
-import { parsePriceCents, SERVICES_BY_ID, servicesPayload } from "../_shared/catalog.ts";
+import { getService, parsePriceCents, servicesPayload } from "../_shared/catalog.ts";
 import { adminDb } from "../_shared/db.ts";
 import { activeHolds, holdExpiry, type HoldRow, sweepExpiredHolds } from "../_shared/holds.ts";
 import { chicagoNow, hhmmToMin, minToHhmm, readDayHours, readHours } from "../_shared/hours.ts";
@@ -33,7 +33,7 @@ interface Availability {
 }
 
 async function availabilityFor(serviceId: string, date: string): Promise<Availability> {
-  const service = SERVICES_BY_ID.get(serviceId);
+  const service = await getService(serviceId);
   if (!service) throw new HttpError(404, "Unknown service");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "date must be YYYY-MM-DD");
 
@@ -89,8 +89,8 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
   return { date, closed: false, blocked: false, slots };
 }
 
-export function handleServices(): Response {
-  return json(servicesPayload());
+export async function handleServices(): Promise<Response> {
+  return json(await servicesPayload());
 }
 
 // GET /api/hours (public). The public site prints this, so it is the same
@@ -115,7 +115,7 @@ export async function handleCreateBooking(req: Request): Promise<Response> {
   const time = String(body.time ?? "");
   const notes = typeof body.notes === "string" ? body.notes.slice(0, 1000) : "";
 
-  const service = SERVICES_BY_ID.get(serviceId);
+  const service = await getService(serviceId);
   if (!service) throw new HttpError(400, "Unknown service");
   if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
     throw new HttpError(400, "time must be HH:MM");

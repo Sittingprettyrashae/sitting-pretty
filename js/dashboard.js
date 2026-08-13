@@ -48,7 +48,9 @@
     flyer: null,
     // Waitlist from the site popup + reviews awaiting her word.
     leads: [],
-    reviews: []
+    reviews: [],
+    // Her live menu (the services table), loaded when the Menu tab opens.
+    services: []
   };
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -954,6 +956,136 @@
     renderLeads();
   }
 
+  // ---------------- menu editor ----------------
+  function depositDollars(cents) {
+    return cents == null ? "" : String(Math.round(cents / 100));
+  }
+
+  function renderMenu() {
+    var list = $("menu-list");
+    var countEl = $("menu-count");
+    var visible = state.services.filter(function (r) { return r.active; });
+    countEl.textContent = String(visible.length);
+    countEl.hidden = visible.length === 0;
+    $("menu-empty").hidden = state.services.length > 0;
+    if (!state.services.length) { list.innerHTML = ""; return; }
+
+    // category datalist for the add form
+    var cats = [];
+    state.services.forEach(function (r) { if (cats.indexOf(r.cat) === -1) cats.push(r.cat); });
+    $("menu-cats").innerHTML = cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join("");
+
+    var rowHtml = function (r) {
+      var row = '<div class="menu-row' + (r.active ? '' : ' is-hidden') + '" data-svc="' + esc(r.service_id) + '">';
+      row += '<div class="mr-namecell"><span class="mr-name">' + esc(r.name) + "</span>";
+      if (r.note) row += '<span class="mr-note">' + esc(r.note) + "</span>";
+      row += "</div>";
+      row += '<input class="field mr-price" value="' + esc(r.price) + '" aria-label="Price for ' + esc(r.name) + '">';
+      row += '<input class="field mr-dur" type="number" min="15" max="720" step="15" value="' + esc(String(r.duration_min)) + '" aria-label="Minutes for ' + esc(r.name) + '">';
+      row += '<input class="field mr-dep" type="number" min="1" step="1" value="' + esc(depositDollars(r.deposit_cents)) + '" placeholder="none" aria-label="Deposit dollars for ' + esc(r.name) + '">';
+      row += '<button class="btn btn-solid btn-sm mr-save" type="button" disabled>Save</button>';
+      row += r.active
+        ? '<button class="btn btn-ghost btn-sm mr-toggle" type="button" data-active="false">Remove</button>'
+        : '<button class="btn btn-solid btn-sm mr-toggle" type="button" data-active="true">Bring it back</button>';
+      row += "</div>";
+      return row;
+    };
+
+    var html = "";
+    cats.forEach(function (cat) {
+      var rows = state.services.filter(function (r) { return r.cat === cat; });
+      var live = rows.filter(function (r) { return r.active; });
+      var hidden = rows.filter(function (r) { return !r.active; });
+      html += '<div class="menu-cat"><h3>' + esc(cat) + '<span class="gcount">' + live.length + "</span></h3>";
+      html += live.map(rowHtml).join("");
+      if (hidden.length) {
+        html += '<details class="menu-hiddens"><summary>' + hidden.length +
+          (hidden.length === 1 ? " removed style" : " removed styles") + "</summary>";
+        html += hidden.map(rowHtml).join("");
+        html += "</details>";
+      }
+      html += "</div>";
+    });
+    list.innerHTML = html;
+  }
+
+  function findServiceRowEl(target) { return target.closest(".menu-row"); }
+
+  function saveServiceRow(rowEl, btn) {
+    var id = rowEl.getAttribute("data-svc");
+    var dep = rowEl.querySelector(".mr-dep").value.trim();
+    var body = {
+      price: rowEl.querySelector(".mr-price").value.trim(),
+      duration_min: Number(rowEl.querySelector(".mr-dur").value),
+      deposit_cents: dep === "" ? null : Math.round(Number(dep) * 100)
+    };
+    btn.disabled = true;
+    window.SP.request("/api/admin/services/" + encodeURIComponent(id), { method: "PUT", body: body })
+      .then(function (res) {
+        var updated = res && res.service;
+        state.services = state.services.map(function (r) {
+          return r.service_id === id && updated ? updated : r;
+        });
+        renderMenu();
+        toast("Saved. Your site shows the new details now.");
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(errMsg(err));
+      });
+  }
+
+  function toggleService(rowEl, btn) {
+    var id = rowEl.getAttribute("data-svc");
+    var active = btn.getAttribute("data-active") === "true";
+    btn.disabled = true;
+    apiPost("/api/admin/services/" + encodeURIComponent(id) + "/active", { active: active })
+      .then(function (res) {
+        var updated = res && res.service;
+        state.services = state.services.map(function (r) {
+          return r.service_id === id && updated ? updated : r;
+        });
+        renderMenu();
+        toast(active ? "Back on your menu." : "Removed. Clients can no longer book it.");
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(errMsg(err));
+      });
+  }
+
+  function addMenuStyle() {
+    var say = function (text, ok) {
+      var el = $("ma-msg");
+      el.textContent = text; el.hidden = !text;
+    };
+    var dep = $("ma-dep").value.trim();
+    var body = {
+      cat: $("ma-cat").value.trim(),
+      name: $("ma-name").value.trim(),
+      price: $("ma-price").value.trim(),
+      duration_min: Number($("ma-dur").value),
+      deposit_cents: dep === "" ? null : Math.round(Number(dep) * 100)
+    };
+    apiPost("/api/admin/services", body)
+      .then(function (res) {
+        if (res && res.service) state.services.push(res.service);
+        // De-dup in case it was a revived hidden row rather than a new one.
+        var seen = {};
+        state.services = state.services.filter(function (r) {
+          if (seen[r.service_id]) return false;
+          seen[r.service_id] = true; return true;
+        }).map(function (r) {
+          return res && res.service && r.service_id === res.service.service_id ? res.service : r;
+        });
+        renderMenu();
+        ["ma-name", "ma-price", "ma-dur", "ma-dep"].forEach(function (id) { $(id).value = ""; });
+        say("");
+        toast("Added. It is live on your site.");
+      })
+      .catch(function (err) { say(errMsg(err)); });
+  }
+
   // ---------------- waitlist (leads) ----------------
   function updateLeadsUi() {
     var n = state.leads.length;
@@ -1331,7 +1463,7 @@
     tabs.forEach(function (t) {
       t.setAttribute("aria-pressed", String(t.getAttribute("data-view") === v));
     });
-    ["bookings", "calendar", "hours", "clients", "reviews", "broadcast"].forEach(function (name) {
+    ["bookings", "calendar", "hours", "menu", "clients", "reviews", "broadcast"].forEach(function (name) {
       var el = $("view-" + name);
       if (name === v) {
         if (el.hidden) {
@@ -1349,6 +1481,13 @@
     if (v === "hours") {
       renderHours();
       if (!state.hoursLoaded) loadHours();
+    }
+    if (v === "menu") {
+      api("/api/admin/services").then(function (res) {
+        state.services = (res && res.services) || [];
+        renderMenu();
+      }).catch(function (err) { toast("Could not load your menu. " + errMsg(err)); });
+      renderMenu();
     }
     if (v === "clients") {
       if (!state.clients.length) {
@@ -1656,6 +1795,23 @@
       var btn = e.target.closest("[data-lead-remove]");
       if (!btn || btn.disabled) return;
       removeLead(btn, btn.getAttribute("data-lead-remove"));
+    });
+
+    // Menu editor: save / remove / restore, and the save button lights up
+    // the moment any field in its row changes.
+    $("menu-list").addEventListener("input", function (e) {
+      var rowEl = findServiceRowEl(e.target);
+      if (rowEl) rowEl.querySelector(".mr-save").disabled = false;
+    });
+    $("menu-list").addEventListener("click", function (e) {
+      var save = e.target.closest(".mr-save");
+      if (save && !save.disabled) return saveServiceRow(findServiceRowEl(save), save);
+      var tog = e.target.closest(".mr-toggle");
+      if (tog && !tog.disabled) return toggleService(findServiceRowEl(tog), tog);
+    });
+    $("menu-add").addEventListener("submit", function (e) {
+      e.preventDefault();
+      addMenuStyle();
     });
 
     // outbox drawer. It claims role=dialog aria-modal=true, so keep keyboard

@@ -1,5 +1,8 @@
 // Service catalog — transcribed verbatim from Ke'Ebonie Hill's StyleSeat profile (Aug 2026).
-// Prices, durations, and deposits are hers. Do not edit without her sign-off.
+// NOW SEED DATA ONLY: her live menu lives in the services table of her
+// database, edited from the dashboard's Menu tab, and this file answers only
+// as a fallback when that table is empty or unreachable. Edits here do NOT
+// change the live site once the table is seeded.
 const SERVICES = [
   { cat: "Sew-ins", items: [
     ["2-Part Sew In", "$175", "3 hr", ""],

@@ -3,6 +3,7 @@
 // the service role key.
 
 import { requireAdmin } from "../_shared/auth.ts";
+import { loadAllRows, slugify } from "../_shared/catalog.ts";
 import { adminDb } from "../_shared/db.ts";
 import { storeFlyer } from "../_shared/flyer.ts";
 import {
@@ -47,6 +48,18 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   if (path === "/admin/hours") {
     if (req.method === "GET") return json({ days: await readHours() });
     if (req.method === "PUT") return await saveHours(req);
+  }
+  if (path === "/admin/services") {
+    if (req.method === "GET") return await listServices();
+    if (req.method === "POST") return await addService(req);
+  }
+  const svcMatch = path.match(/^\/admin\/services\/([a-z0-9-]+)$/);
+  if (req.method === "PUT" && svcMatch) {
+    return await editService(req, svcMatch[1]);
+  }
+  const svcActiveMatch = path.match(/^\/admin\/services\/([a-z0-9-]+)\/active$/);
+  if (req.method === "POST" && svcActiveMatch) {
+    return await setServiceActive(req, svcActiveMatch[1]);
   }
   if (req.method === "GET" && path === "/admin/clients") {
     return await listClients();
@@ -270,6 +283,138 @@ async function listClients(): Promise<Response> {
     last_booking: stats.get(c.id)?.last ?? null,
   }));
   return json({ clients });
+}
+
+// ---------------------------------------------------------------------------
+// Her menu (the Menu tab). Every mutation writes the services table; the
+// public site and the booking engine read it live, so a price she saves is
+// the price the next client pays. Existing bookings are never touched: they
+// snapshotted their price when they were made.
+// ---------------------------------------------------------------------------
+
+const PRICE_RE = /^\$\d+\+?$/;
+
+function cleanServiceFields(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  if (body.price !== undefined) {
+    const price = String(body.price).trim().replace(/\s+/g, "");
+    const normalized = price.startsWith("$") ? price : "$" + price;
+    if (!PRICE_RE.test(normalized)) {
+      throw new HttpError(400, 'Price should look like "$75" or "$50+" (the + means "and up").');
+    }
+    out.price = normalized;
+  }
+  if (body.duration_min !== undefined) {
+    const d = Number(body.duration_min);
+    if (!Number.isInteger(d) || d < 15 || d > 720) {
+      throw new HttpError(400, "How long it takes should be between 15 minutes and 12 hours.");
+    }
+    out.duration_min = d;
+  }
+  if (body.deposit_cents !== undefined) {
+    if (body.deposit_cents === null || body.deposit_cents === "") {
+      out.deposit_cents = null; // no set deposit: she confirms by text, request-only
+    } else {
+      const c = Number(body.deposit_cents);
+      if (!Number.isInteger(c) || c <= 0 || c > 100000000) {
+        throw new HttpError(400, "The deposit should be a dollar amount, or empty for none.");
+      }
+      out.deposit_cents = c;
+    }
+  }
+  if (body.note !== undefined) out.note = String(body.note).trim().slice(0, 300);
+  if (body.name !== undefined) {
+    const name = String(body.name).trim().slice(0, 120);
+    if (name.length < 2) throw new HttpError(400, "Give the style a name.");
+    out.name = name;
+  }
+  return out;
+}
+
+const serviceShape =
+  "service_id, cat, name, price, duration_min, deposit_cents, note, active, cat_order, sort_order";
+
+async function listServices(): Promise<Response> {
+  const rows = await loadAllRows();
+  return json({ services: rows });
+}
+
+// POST /admin/services { cat, name, price, duration_min, deposit_cents?, note? }
+async function addService(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const cat = String(body.cat ?? "").trim().slice(0, 80);
+  if (cat.length < 2) throw new HttpError(400, "Pick or type a category for this style.");
+  const fields = cleanServiceFields(body);
+  if (!fields.name) throw new HttpError(400, "Give the style a name.");
+  if (!fields.price) throw new HttpError(400, "Give the style a price.");
+  if (fields.duration_min === undefined) {
+    throw new HttpError(400, "Say how long this style takes.");
+  }
+  const serviceId = slugify(cat + "--" + String(fields.name));
+
+  const db = adminDb();
+  const existing = await db.from("services").select(serviceShape).eq("service_id", serviceId).maybeSingle();
+  if (existing.error) throw new HttpError(500, "Could not save that style");
+  if (existing.data && existing.data.active) {
+    throw new HttpError(409, "That style already exists in this category. Edit it instead.");
+  }
+
+  // Where in the menu it lands: with its category, at the end.
+  const catRows = await db.from("services").select("cat_order, sort_order").eq("cat", cat)
+    .order("sort_order", { ascending: false }).limit(1);
+  const maxCat = await db.from("services").select("cat_order").order("cat_order", { ascending: false }).limit(1);
+  const catOrder = catRows.data?.length
+    ? catRows.data[0].cat_order
+    : ((maxCat.data?.[0]?.cat_order ?? -1) + 1);
+  const sortOrder = (catRows.data?.[0]?.sort_order ?? -1) + 1;
+
+  const row = {
+    service_id: serviceId,
+    cat,
+    ...fields,
+    deposit_cents: fields.deposit_cents === undefined ? null : fields.deposit_cents,
+    note: fields.note ?? "",
+    active: true,
+    cat_order: catOrder,
+    sort_order: sortOrder,
+  };
+  // A style she removed earlier comes back to life with the new details.
+  const saved = existing.data
+    ? await db.from("services").update(row).eq("service_id", serviceId).select(serviceShape).single()
+    : await db.from("services").insert(row).select(serviceShape).single();
+  if (saved.error) throw new HttpError(500, "Could not save that style");
+  return json({ service: saved.data });
+}
+
+// PUT /admin/services/:service_id { price?, duration_min?, deposit_cents?, note?, name? }
+// The slug never changes, even on a rename, so bookings keep resolving.
+async function editService(req: Request, serviceId: string): Promise<Response> {
+  const fields = cleanServiceFields(await readJson(req));
+  if (!Object.keys(fields).length) throw new HttpError(400, "Nothing to change.");
+  const res = await adminDb()
+    .from("services")
+    .update(fields)
+    .eq("service_id", serviceId)
+    .select(serviceShape)
+    .maybeSingle();
+  if (res.error) throw new HttpError(500, "Could not save that change");
+  if (!res.data) throw new HttpError(404, "That style is not on the menu");
+  return json({ service: res.data });
+}
+
+// POST /admin/services/:service_id/active { active } — remove/restore, softly.
+async function setServiceActive(req: Request, serviceId: string): Promise<Response> {
+  const body = await readJson(req);
+  if (typeof body.active !== "boolean") throw new HttpError(400, "active must be true or false");
+  const res = await adminDb()
+    .from("services")
+    .update({ active: body.active })
+    .eq("service_id", serviceId)
+    .select(serviceShape)
+    .maybeSingle();
+  if (res.error) throw new HttpError(500, "Could not update that style");
+  if (!res.data) throw new HttpError(404, "That style is not on the menu");
+  return json({ service: res.data });
 }
 
 // GET /admin/leads -> { leads: [{id, name, email, phone, source, ts}] }

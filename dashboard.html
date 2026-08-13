@@ -339,6 +339,43 @@ button.cal-day:hover{border-color:var(--rose)}
 .client-stats{text-align:right;font-size:.8rem;color:var(--ink-faint);white-space:nowrap}
 .client-stats strong{display:block;font-size:.92rem;color:var(--ink)}
 
+/* ---------- menu editor ---------- */
+.menu-add{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:var(--shadow-soft);padding:1rem 1.05rem;margin:1rem 0 1.4rem;
+}
+.menu-add-grid{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+.menu-add-grid input{margin:0}
+.menu-add-grid button{grid-column:1 / -1}
+@media (min-width:760px){
+  .menu-add-grid{grid-template-columns:1.1fr 1.4fr 1fr 1fr 1.3fr auto}
+  .menu-add-grid button{grid-column:auto}
+}
+.menu-cat{margin-bottom:1.6rem}
+.menu-cat > h3{
+  font-size:1.02rem;font-weight:900;padding:.55rem .2rem;border-bottom:1px solid var(--line-strong);
+  display:flex;align-items:center;gap:.5rem;
+}
+.menu-cat > h3 .gcount{margin-left:auto}
+.menu-row{
+  display:grid;grid-template-columns:1.6fr .8fr .8fr .9fr auto auto;gap:.5rem;align-items:center;
+  padding:.55rem .2rem;border-bottom:1px dashed var(--line);
+}
+.menu-row input{margin:0;padding:.5rem .65rem;font-size:.92rem;min-height:42px}
+.menu-row .mr-name{font-weight:700;font-size:.93rem;word-break:break-word}
+.menu-row .mr-note{display:block;font-weight:500;font-size:.78rem;color:var(--ink-faint);margin-top:.1rem}
+.menu-row .btn{min-height:42px;padding:.4rem .9rem;font-size:.84rem}
+.menu-row .mr-save[disabled]{opacity:.35}
+.menu-hiddens{margin-top:.5rem}
+.menu-hiddens summary{
+  cursor:pointer;font-size:.85rem;font-weight:700;color:var(--ink-faint);padding:.45rem .2rem;
+}
+.menu-row.is-hidden .mr-name{color:var(--ink-faint);text-decoration:line-through}
+@media (max-width:760px){
+  .menu-row{grid-template-columns:1fr 1fr;row-gap:.45rem}
+  .menu-row .mr-namecell{grid-column:1 / -1}
+}
+
 /* ---------- reviews ---------- */
 .review-row{
   display:flex;flex-direction:column;gap:.5rem;
@@ -578,6 +615,7 @@ button.cal-day:hover{border-color:var(--rose)}
       <button class="tab" data-view="bookings" aria-pressed="true">Bookings<span id="attention-badge" class="badge" hidden></span></button>
       <button class="tab" data-view="calendar" aria-pressed="false">Calendar</button>
       <button class="tab" data-view="hours" aria-pressed="false">Hours</button>
+      <button class="tab" data-view="menu" aria-pressed="false">Menu</button>
       <button class="tab" data-view="clients" aria-pressed="false">Clients</button>
       <button class="tab" data-view="reviews" aria-pressed="false">Reviews<span id="reviews-badge" class="badge" hidden></span></button>
       <button class="tab" data-view="broadcast" aria-pressed="false">Message everyone</button>
@@ -620,6 +658,28 @@ button.cal-day:hover{border-color:var(--rose)}
       </div>
       <p id="hours-saved" class="hours-saved" role="status" hidden></p>
       <div id="hours-affected"></div>
+    </section>
+
+    <section id="view-menu" class="view" aria-label="Your menu" hidden>
+      <h2 class="script-eyebrow">Your menu <span id="menu-count" class="gcount" hidden></span></h2>
+      <p class="view-sub">Every style and price on your site, live. Change a price and tap Save, and the next client sees the new one. Removing a style just hides it; you can bring it back any time.</p>
+
+      <form id="menu-add" class="menu-add">
+        <p class="field-label" style="margin-bottom:.4rem">Add a style</p>
+        <div class="menu-add-grid">
+          <input id="ma-cat" class="field" list="menu-cats" placeholder="Category" autocomplete="off">
+          <datalist id="menu-cats"></datalist>
+          <input id="ma-name" class="field" placeholder="Style name" autocomplete="off">
+          <input id="ma-price" class="field" placeholder="Price, like $75 or $50+" autocomplete="off">
+          <input id="ma-dur" class="field" type="number" min="15" max="720" step="15" placeholder="Minutes it takes">
+          <input id="ma-dep" class="field" type="number" min="1" step="1" placeholder="Deposit $ (empty = you confirm by text)">
+          <button class="btn btn-solid" type="submit">Add it</button>
+        </div>
+        <p id="ma-msg" class="hours-saved" role="status" hidden></p>
+      </form>
+
+      <div id="menu-list"></div>
+      <p id="menu-empty" class="empty" hidden>Your menu is loading. If this never fills in, check your connection and reload.</p>
     </section>
 
     <section id="view-clients" class="view" aria-label="Clients" hidden>

@@ -100,7 +100,10 @@ Monday to Friday 09:00-20:00, Saturday 09:00-18:00 (her StyleSeat hours).
 
 ## Booking (client)
 - `GET /api/services` → `{categories:[{cat, items:[{service_id,name,price,duration_min,deposit_cents|null,note}]}]}`
-  (server-derived from services-data.js so client and server always agree)
+  THE MENU LIVES IN THE DATABASE (public.services), edited from the
+  dashboard's Menu tab; services-data.js is only the seed and the fallback
+  for an unseeded or unreachable table. Existing bookings are never affected
+  by menu edits: they snapshot name/price/deposit at booking time.
 - `GET /api/availability?service_id=X&date=YYYY-MM-DD` →
   `{date, closed:bool, blocked:bool, slots:["09:00","09:30",...]}`
 - `POST /api/bookings` (auth) `{service_id, date, time, notes?}` →
@@ -248,6 +251,18 @@ from the notification. They are never sent to the client.
 - `POST /api/admin/blocked-days` `{date, reason?}` → `{days}` (idempotent)
 - `DELETE /api/admin/blocked-days/:date` → `{days}`
 - `GET /api/admin/clients` → `{clients:[{id,email,name,phone,bookings_count,last_booking}]}`
+- `GET /api/admin/services` → `{services:[{service_id,cat,name,price,duration_min,deposit_cents,note,active,cat_order,sort_order}]}` — her whole menu including hidden styles.
+- `POST /api/admin/services` `{cat, name, price, duration_min, deposit_cents?, note?}`
+  → `{service}` — add a style (409 if the slug already exists and is active;
+  re-adding a removed style revives it with the new details). Price must look
+  like `$75` or `$50+`; duration 15–720 min; deposit in cents or null
+  (null = request-only, she confirms by text).
+- `PUT /api/admin/services/:service_id` `{price?, duration_min?, deposit_cents?, note?, name?}`
+  → `{service}` — edit; the slug never changes, even on rename, so existing
+  bookings keep resolving.
+- `POST /api/admin/services/:service_id/active` `{active}` → `{service}` —
+  remove (hide) or restore a style. Hidden styles cannot be booked and do not
+  appear on the site.
 - `GET /api/admin/leads` → `{leads:[{id,name,email,phone,source,ts}]}` — her
   waitlist from the site popup, newest first.
 - `DELETE /api/admin/leads/:id` → `{leads}` — take someone off the waitlist

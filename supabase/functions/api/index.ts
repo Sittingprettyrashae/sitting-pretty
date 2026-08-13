@@ -60,7 +60,7 @@ Deno.serve(async (req: Request) => {
       await sweepExpiredDeposits();
     }
 
-    if (req.method === "GET" && path === "/services") return handleServices();
+    if (req.method === "GET" && path === "/services") return await handleServices();
     if (req.method === "GET" && path === "/hours") return await handleHours();
     if (req.method === "GET" && path === "/availability") return await handleAvailability(url);
     if (path === "/me") return await handleMe(req);
