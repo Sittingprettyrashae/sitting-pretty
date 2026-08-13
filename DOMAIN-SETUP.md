@@ -1,9 +1,22 @@
 # Pointing sittingprettyrashae.com at her site
 
-Domain is in **her** Cloudflare account (Sittingprettyrashae). Do DNS FIRST,
-then run the cutover script. Doing it the other way makes the working github.io
-URL redirect to a domain that is not resolving yet, which looks like a dead site
-until DNS propagates.
+**The repo is moving to HER GitHub first (Sittingprettyrashae), then the domain
+points at it. Do this order or the site breaks mid-move.**
+
+### Step 0 — Move the repo to her account (one-time)
+1. **She accepts the transfer**: a transfer of `sitting-pretty` was sent to her
+   GitHub. She opens the email or the banner at github.com/Sittingprettyrashae
+   and clicks Accept. It becomes `Sittingprettyrashae/sitting-pretty`.
+2. **She adds the developer back**: her repo > Settings > Collaborators > add
+   `taylormadecreative` (Admin, so he can manage Pages), and he accepts the
+   invite.
+3. **Developer runs** `scripts/after-transfer.sh` — repoints the git remote,
+   re-enables GitHub Pages on her repo, and deploys. Her site then serves at
+   `https://sittingprettyrashae.github.io/sitting-pretty/`.
+
+Only after the site loads from HER account, do the domain below.
+
+---
 
 ## Step 1 — Add these DNS records in her Cloudflare
 
