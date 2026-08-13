@@ -26,7 +26,7 @@ www redirect:
 
 | Type  | Name | Value                        | Proxy    |
 |-------|------|------------------------------|----------|
-| CNAME | www  | taylormadecreative.github.io | DNS only |
+| CNAME | www  | sittingprettyrashae.github.io | DNS only |
 
 (Optional IPv6, same idea, name `@`, type AAAA: `2606:50c0:8000::153`,
 `2606:50c0:8001::153`, `2606:50c0:8002::153`, `2606:50c0:8003::153`.)
@@ -60,7 +60,7 @@ The github.io URL keeps working and just redirects to the new one.
 After the cert is live, enforce HTTPS:
 
 ```sh
-gh api -X PUT repos/taylormadecreative/sitting-pretty/pages -f https_enforced=true
+gh api -X PUT repos/Sittingprettyrashae/sitting-pretty/pages -f https_enforced=true
 ```
 
 ## What she gets
