@@ -356,6 +356,7 @@ export function renderNotification(event, data) {
       if (flyer) emailParts.push('Here is the flyer: ' + flyer);
       if (words) emailParts.push(words);
       emailParts.push('Sitting Pretty\n' + PHONE);
+      emailParts.push('Want off this list? Just reply and say so.');
       const html = flyer
         ? '<div style="font-family:sans-serif;line-height:1.5;color:#3a2530">' +
           '<p>Hi ' + esc(name) + ',</p>' +

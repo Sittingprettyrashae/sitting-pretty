@@ -339,6 +339,19 @@ button.cal-day:hover{border-color:var(--rose)}
 .client-stats{text-align:right;font-size:.8rem;color:var(--ink-faint);white-space:nowrap}
 .client-stats strong{display:block;font-size:.92rem;color:var(--ink)}
 
+/* ---------- reviews ---------- */
+.review-row{
+  display:flex;flex-direction:column;gap:.5rem;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:var(--shadow-soft);padding:.95rem 1.05rem;
+}
+.review-row .rv-top{display:flex;justify-content:space-between;gap:.8rem;align-items:center;flex-wrap:wrap}
+.review-row .rv-stars{color:var(--champagne);letter-spacing:.12em;font-size:.92rem}
+.review-row .rv-body{font-size:.94rem;color:var(--ink);line-height:1.5}
+.review-row .rv-who{font-size:.82rem;color:var(--ink-faint)}
+.review-row .rv-who b{color:var(--ink-dim)}
+.review-row .rv-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+
 /* ---------- broadcast ---------- */
 .suggests{display:flex;gap:.45rem;flex-wrap:wrap;margin-bottom:1rem}
 .suggest{
@@ -409,6 +422,11 @@ button.cal-day:hover{border-color:var(--rose)}
 .sms-off{font-size:.75rem;color:var(--ink-dim);margin-top:.5rem;padding:.45rem .6rem;
   background:var(--surface-2);border-radius:.6rem;line-height:1.45}
 .send-area{margin-top:.4rem}
+.include-leads{
+  display:flex;align-items:center;gap:.55rem;margin-bottom:.8rem;
+  font-size:.92rem;font-weight:700;color:var(--ink-dim);cursor:pointer;
+}
+.include-leads input{width:1.1rem;height:1.1rem;accent-color:var(--rose);cursor:pointer}
 .confirm-box{
   background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-card);
   box-shadow:var(--shadow-lift);padding:1rem;text-align:center;
@@ -561,6 +579,7 @@ button.cal-day:hover{border-color:var(--rose)}
       <button class="tab" data-view="calendar" aria-pressed="false">Calendar</button>
       <button class="tab" data-view="hours" aria-pressed="false">Hours</button>
       <button class="tab" data-view="clients" aria-pressed="false">Clients</button>
+      <button class="tab" data-view="reviews" aria-pressed="false">Reviews<span id="reviews-badge" class="badge" hidden></span></button>
       <button class="tab" data-view="broadcast" aria-pressed="false">Message everyone</button>
     </nav>
 
@@ -609,6 +628,18 @@ button.cal-day:hover{border-color:var(--rose)}
       <input id="client-search" class="field" type="search" placeholder="Search by name, email, or phone" autocomplete="off">
       <ul id="clients-list" class="clients-list"></ul>
       <p id="clients-empty" class="empty" hidden>No clients match that search.</p>
+
+      <h2 class="script-eyebrow" style="margin-top:2.4rem">Waitlist <span id="leads-count" class="gcount" hidden></span></h2>
+      <p class="view-sub">People who left their name on your site so they would hear from you. When you message everyone, you can include them with one tap, and Remove takes anyone off the list for good.</p>
+      <ul id="leads-list" class="clients-list"></ul>
+      <p id="leads-empty" class="empty" hidden>Nobody on the waitlist yet. The popup on your site fills this list for you.</p>
+    </section>
+
+    <section id="view-reviews" class="view" aria-label="Reviews" hidden>
+      <h2 class="script-eyebrow">Reviews <span id="reviews-count" class="gcount" hidden></span></h2>
+      <p class="view-sub">New reviews wait here until you approve them. Only what you approve shows on your site, and you can hide one again any time.</p>
+      <ul id="reviews-list" class="clients-list"></ul>
+      <p id="reviews-empty" class="empty" hidden>No reviews yet. Clients can leave one from the Reviews section on your site once they are signed in.</p>
     </section>
 
     <section id="view-broadcast" class="view" aria-label="Message everyone" hidden>
@@ -664,6 +695,10 @@ button.cal-day:hover{border-color:var(--rose)}
         </figure>
       </div>
       <div class="send-area">
+        <label class="include-leads" for="bc-include-leads">
+          <input type="checkbox" id="bc-include-leads">
+          <span id="bc-include-leads-label">Also send this to your waitlist</span>
+        </label>
         <button id="bc-send" class="btn btn-solid btn-wide" type="button">Send to every client</button>
         <div id="bc-confirm" class="confirm-box" hidden>
           <p id="bc-confirm-line">This goes to every client.</p>

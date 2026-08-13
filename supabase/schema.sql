@@ -830,3 +830,71 @@ create policy hours_public_read on public.hours
 
 -- blocked_days, broadcasts, notifications_log: no client policies at all.
 -- Only the service role reads or writes them.
+
+-- ---------------------------------------------------------------------------
+-- leads: people who are not clients yet. The popup on the public site feeds
+-- this table so Ebony has a marketing list beyond the people who already
+-- booked. Written by POST /api/leads (edge function, service role) after
+-- validation; the browser can neither read nor write it directly, so no
+-- visitor can pull the list.
+-- source records where the lead came from ('popup' today; more later).
+-- ---------------------------------------------------------------------------
+create table if not exists public.leads (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null,
+  phone text,
+  source text not null default 'popup',
+  created_at timestamptz not null default now()
+);
+
+-- The same person tapping the popup twice must not become two leads. The
+-- handler lowercases email before every insert, so a plain unique index is
+-- correct AND it is what lets the upsert's ON CONFLICT (email) work: an
+-- expression index on lower(email) cannot arbitrate that clause, and with
+-- one in place every insert dies at plan time (42P10) — the whole endpoint
+-- returns 500 while the demo, which dedupes in JS, works perfectly.
+create unique index if not exists leads_email_key
+  on public.leads (email);
+drop index if exists public.leads_email_lower_idx;
+
+alter table public.leads enable row level security;
+-- No policies at all: only the service role reads or writes leads.
+
+-- ---------------------------------------------------------------------------
+-- reviews: real words from real clients, nothing else. A review can only be
+-- created by a signed-in client (POST /api/reviews checks the session), the
+-- name is snapshotted from their profile so nobody reviews under someone
+-- else's name, and NOTHING shows on the site until Ebony approves it in her
+-- dashboard. status: pending (new), approved (public), hidden (her call).
+-- ---------------------------------------------------------------------------
+create table if not exists public.reviews (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references public.clients (id) on update cascade on delete set null,
+  name text not null,
+  service text not null default '',
+  rating integer not null check (rating between 1 and 5),
+  body text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'approved', 'hidden')),
+  created_at timestamptz not null default now()
+);
+
+-- One review per client, the latest wins: a returning client updates her
+-- words (and goes back to pending for re-approval), and a hostile account
+-- cannot flood the moderation queue with hundreds of rows. NOT a partial
+-- index: ON CONFLICT (client_id) cannot be arbitrated by a partial index
+-- (the same 42P10 failure the leads index had), and a plain unique index
+-- still allows many NULLs, so reviews orphaned by a deleted account keep.
+create unique index if not exists reviews_client_key
+  on public.reviews (client_id);
+
+alter table public.reviews enable row level security;
+
+-- NO policies, not even a read for approved rows. A row-level policy cannot
+-- hide columns, so a public select policy would let anyone with the anon key
+-- read client_id (the auth user id) straight off PostgREST. Public reads go
+-- through GET /api/reviews, which serves approved rows only and projects
+-- exactly the public columns. Writes go through POST /api/reviews so the
+-- name snapshot and the pending status can never be forged from a browser.
+drop policy if exists reviews_public_read_approved on public.reviews;

@@ -175,6 +175,22 @@ Payment effects:
 - balance paid → added to `paid_cents`, `paid_in_full` true, paid-in-full
   notification to the client and a payment notification to Ebony.
 
+## Leads & Reviews
+- `POST /api/leads` `{name, email, phone?, source?}` → `{ok:true}` — the site
+  popup's waitlist signup. The one public write in the API: strict validation
+  (phone, when given, must carry 10–15 digits), a per-IP throttle (6/min →
+  429), a honeypot field (`company` — any non-empty value gets `{ok:true}`
+  and no row), and a duplicate email answers exactly like a fresh one so the
+  list can't be probed.
+- `GET /api/reviews` → `{reviews:[{name,service,rating,body,ts}], count}` —
+  APPROVED reviews only, newest first, max 60. `name` is shortened to first
+  name + last initial ("Tasha R."); the full name stays admin-only.
+- `POST /api/reviews` `{rating:1-5, body, service?}` (auth) → `{ok:true}` —
+  signed-in clients only. The display name is snapshotted from the profile
+  server-side. ONE review per client, the latest wins, and every save (new or
+  edited) goes back to `pending` until Ebony approves it in her dashboard.
+  Nothing shows publicly before that.
+
 ## What Ebony is told (owner notifications)
 
 She should never have to open the dashboard to find out something happened.
@@ -230,8 +246,21 @@ from the notification. They are never sent to the client.
 - `POST /api/admin/blocked-days` `{date, reason?}` → `{days}` (idempotent)
 - `DELETE /api/admin/blocked-days/:date` → `{days}`
 - `GET /api/admin/clients` → `{clients:[{id,email,name,phone,bookings_count,last_booking}]}`
-- `POST /api/admin/broadcast` `{subject, message, image?}` → `{sent:int, image_url?}`
-  — one message to every client (email + sms), logged in broadcasts.
+- `GET /api/admin/leads` → `{leads:[{id,name,email,phone,source,ts}]}` — her
+  waitlist from the site popup, newest first.
+- `DELETE /api/admin/leads/:id` → `{leads}` — take someone off the waitlist
+  (the broadcast footer invites "just reply" opt-outs; this honors them).
+- `GET /api/admin/reviews` → `{reviews:[{id,name,service,rating,body,status,ts}]}`
+  — every review, pending first (ordered before the limit, so pending rows
+  can never be crowded out).
+- `POST /api/admin/reviews/:id/status` `{status}` → `{review}` — allowed:
+  approved (shows on the site), hidden, pending.
+- `POST /api/admin/broadcast` `{subject, message, image?, include_leads?}` → `{sent:int, image_url?}`
+  — one message to every client (email + sms), logged in broadcasts. With
+  `include_leads: true` the waitlist gets it too, minus anyone whose email is
+  already a client, so nobody hears it twice. Both audiences (and the flyer)
+  are loaded BEFORE anything sends, so any failure means nobody was messaged
+  and pressing send again is safe.
   - `image` is an optional flyer as a data URL (`data:image/jpeg;base64,...`).
     Accepted types: jpeg, png, webp. Max 5 MB decoded. Anything else is a 400
     with a plain message naming the limit.

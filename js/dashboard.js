@@ -45,7 +45,10 @@
     hoursLoaded: false,
     hoursSaving: false,
     // Flyer picked for the next broadcast: {dataUrl, name, bytes}.
-    flyer: null
+    flyer: null,
+    // Waitlist from the site popup + reviews awaiting her word.
+    leads: [],
+    reviews: []
   };
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -268,6 +271,18 @@
     api("/api/admin/clients").then(function (res) {
       state.clients = (res && res.clients) || [];
       if (state.view === "clients") renderClients();
+    }).catch(function () { /* loaded again when the tab opens */ });
+
+    api("/api/admin/leads").then(function (res) {
+      state.leads = (res && res.leads) || [];
+      updateLeadsUi();
+      if (state.view === "clients") renderLeads();
+    }).catch(function () { /* loaded again when the tab opens */ });
+
+    api("/api/admin/reviews").then(function (res) {
+      state.reviews = (res && res.reviews) || [];
+      updateReviewsBadge();
+      if (state.view === "reviews") renderReviews();
     }).catch(function () { /* loaded again when the tab opens */ });
 
     // The calendar needs her closed days, so hours load with everything else.
@@ -936,6 +951,115 @@
     }).join("");
     $("clients-list").innerHTML = html;
     $("clients-empty").hidden = filtered.length > 0 || state.clients.length === 0;
+    renderLeads();
+  }
+
+  // ---------------- waitlist (leads) ----------------
+  function updateLeadsUi() {
+    var n = state.leads.length;
+    var countEl = $("leads-count");
+    countEl.textContent = String(n);
+    countEl.hidden = n === 0;
+    var label = $("bc-include-leads-label");
+    if (label) {
+      label.textContent = n > 0
+        ? "Also send this to your waitlist (" + n + (n === 1 ? " person)" : " people)")
+        : "Also send this to your waitlist";
+    }
+    // The checkbox is never disabled: the count is a courtesy, and if the
+    // waitlist failed to load here the server still knows the real list. Her
+    // tick always travels with the send.
+  }
+
+  function renderLeads() {
+    updateLeadsUi();
+    var html = state.leads.map(function (l) {
+      var tel = telHref(l.phone);
+      var when = l.ts ? fmtTs(l.ts) : "";
+      var row = '<li class="client-row"><div>';
+      row += '<span class="client-name">' + esc(l.name || l.email || "Lead") + "</span>";
+      row += '<p class="client-meta">' + esc(l.email || "");
+      if (tel) row += (l.email ? " &middot; " : "") + '<a href="' + esc(tel) + '">' + esc(l.phone) + "</a>";
+      row += "</p></div>";
+      row += '<div class="client-stats"><strong>Waitlist</strong>' + (when ? "Joined " + esc(when) : "");
+      row += '<button class="btn btn-ghost btn-sm" type="button" data-lead-remove="' + esc(l.id) + '" style="display:block;margin-top:.4rem;margin-left:auto">Remove</button>';
+      row += "</div></li>";
+      return row;
+    }).join("");
+    $("leads-list").innerHTML = html;
+    $("leads-empty").hidden = state.leads.length > 0;
+  }
+
+  // Someone asked off the list (the broadcast footer invites exactly that).
+  function removeLead(btn, id) {
+    btn.disabled = true;
+    apiDelete("/api/admin/leads/" + encodeURIComponent(id))
+      .then(function (res) {
+        state.leads = (res && res.leads) || state.leads.filter(function (l) { return l.id !== id; });
+        renderLeads();
+        toast("Removed. They will not get your broadcasts.");
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(errMsg(err));
+      });
+  }
+
+  // ---------------- reviews view ----------------
+  function updateReviewsBadge() {
+    var n = state.reviews.filter(function (r) { return r.status === "pending"; }).length;
+    var el = $("reviews-badge");
+    if (!el) return;
+    if (n > 0) {
+      el.innerHTML = n + '<span class="sr-only"> waiting for approval</span>';
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  var REVIEW_STATUS_META = {
+    pending: { label: "Waiting on you", chip: "chip-awaiting" },
+    approved: { label: "On your site", chip: "chip-confirmed" },
+    hidden: { label: "Hidden", chip: "chip-canceled" }
+  };
+
+  function renderReviews() {
+    var countEl = $("reviews-count");
+    countEl.textContent = String(state.reviews.length);
+    countEl.hidden = state.reviews.length === 0;
+    var stars = function (n) { return "★★★★★".slice(0, Math.max(1, Math.min(5, Number(n) || 1))); };
+    var html = state.reviews.map(function (r) {
+      var meta = REVIEW_STATUS_META[r.status] || REVIEW_STATUS_META.pending;
+      var row = '<li class="review-row"><div class="rv-top">';
+      row += '<span class="rv-stars" aria-label="' + esc(String(r.rating)) + ' out of 5 stars">' + stars(r.rating) + "</span>";
+      row += '<span class="chip ' + meta.chip + '">' + meta.label + "</span></div>";
+      row += '<p class="rv-body">' + escBr(r.body) + "</p>";
+      row += '<p class="rv-who"><b>' + esc(r.name) + "</b>" + (r.service ? " &middot; " + esc(r.service) : "") + (r.ts ? " &middot; " + esc(fmtTs(r.ts)) : "") + "</p>";
+      row += '<div class="rv-actions">';
+      if (r.status !== "approved") row += '<button class="btn btn-solid btn-sm" type="button" data-review="' + esc(r.id) + '" data-set="approved">Put it on the site</button>';
+      if (r.status !== "hidden") row += '<button class="btn btn-ghost btn-sm" type="button" data-review="' + esc(r.id) + '" data-set="hidden">' + (r.status === "approved" ? "Take it down" : "Hide it") + "</button>";
+      row += "</div></li>";
+      return row;
+    }).join("");
+    $("reviews-list").innerHTML = html;
+    $("reviews-empty").hidden = state.reviews.length > 0;
+  }
+
+  function setReviewStatus(btn, id, status) {
+    btn.disabled = true;
+    apiPost("/api/admin/reviews/" + encodeURIComponent(id) + "/status", { status: status })
+      .then(function (res) {
+        var updated = res && res.review;
+        state.reviews = state.reviews.map(function (r) { return r.id === id && updated ? updated : r; });
+        updateReviewsBadge();
+        renderReviews();
+        toast(status === "approved" ? "It's on your site." : "Hidden. Your site will not show it.");
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        toast(errMsg(err));
+      });
   }
 
   // ---------------- broadcast view ----------------
@@ -1108,13 +1232,15 @@
     var flyer = state.flyer;
     var body = { subject: subject, message: message };
     if (flyer) body.image = flyer.dataUrl;
+    if ($("bc-include-leads").checked) body.include_leads = true;
     $("bc-send-yes").disabled = true;
     $("bc-send-no").disabled = true;
     $("bc-send-yes").textContent = "Sending";
     apiPost("/api/admin/broadcast", body)
       .then(function (res) {
         var n = res && typeof res.sent === "number" ? res.sent : 0;
-        var line = "Sent to " + n + (n === 1 ? " client." : " clients.") +
+        var line = "Sent to " + n + (n === 1 ? " person." : " people.") +
+          (body.include_leads ? " Your waitlist got it too." : "") +
           (flyer ? " Your flyer went with it." : "");
         $("bc-result").textContent = line;
         $("bc-result").hidden = false;
@@ -1205,7 +1331,7 @@
     tabs.forEach(function (t) {
       t.setAttribute("aria-pressed", String(t.getAttribute("data-view") === v));
     });
-    ["bookings", "calendar", "hours", "clients", "broadcast"].forEach(function (name) {
+    ["bookings", "calendar", "hours", "clients", "reviews", "broadcast"].forEach(function (name) {
       var el = $("view-" + name);
       if (name === v) {
         if (el.hidden) {
@@ -1231,7 +1357,21 @@
           renderClients();
         }).catch(function (err) { toast("Could not load clients. " + errMsg(err)); });
       }
+      if (!state.leads.length) {
+        api("/api/admin/leads").then(function (res) {
+          state.leads = (res && res.leads) || [];
+          renderLeads();
+        }).catch(function () { /* the block just stays empty */ });
+      }
       renderClients();
+    }
+    if (v === "reviews") {
+      api("/api/admin/reviews").then(function (res) {
+        state.reviews = (res && res.reviews) || [];
+        updateReviewsBadge();
+        renderReviews();
+      }).catch(function (err) { toast("Could not load reviews. " + errMsg(err)); });
+      renderReviews();
     }
   }
 
@@ -1487,9 +1627,12 @@
         $("bc-message").focus();
         return;
       }
+      var audience = $("bc-include-leads").checked
+        ? "every client plus your waitlist"
+        : "every client";
       $("bc-confirm-line").textContent = state.flyer
-        ? "This goes to every client, with your flyer."
-        : "This goes to every client.";
+        ? "This goes to " + audience + ", with your flyer."
+        : "This goes to " + audience + ".";
       $("bc-result").hidden = true;
       $("bc-send").hidden = true;
       $("bc-confirm").hidden = false;
@@ -1500,6 +1643,20 @@
       $("bc-send").focus();
     });
     $("bc-send-yes").addEventListener("click", sendBroadcast);
+
+    // Approve / hide reviews, delegated so re-renders never lose the handler.
+    $("reviews-list").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-review]");
+      if (!btn || btn.disabled) return;
+      setReviewStatus(btn, btn.getAttribute("data-review"), btn.getAttribute("data-set"));
+    });
+
+    // Remove a lead from the waitlist, delegated for the same reason.
+    $("leads-list").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-lead-remove]");
+      if (!btn || btn.disabled) return;
+      removeLead(btn, btn.getAttribute("data-lead-remove"));
+    });
 
     // outbox drawer. It claims role=dialog aria-modal=true, so keep keyboard
     // focus inside it while it is open and close on Escape.

@@ -30,6 +30,7 @@ import {
   handleRefreshHold,
   handleServices,
 } from "./bookings.ts";
+import { handleCreateLead, handleCreateReview, handleListReviews } from "./community.ts";
 import { handleMe } from "./me.ts";
 import { handleCancel } from "./cancel.ts";
 import { handleAdmin } from "./admin.ts";
@@ -64,6 +65,9 @@ Deno.serve(async (req: Request) => {
     if (req.method === "GET" && path === "/availability") return await handleAvailability(url);
     if (path === "/me") return await handleMe(req);
     if (req.method === "POST" && path === "/bookings") return await handleCreateBooking(req);
+    if (req.method === "POST" && path === "/leads") return await handleCreateLead(req);
+    if (req.method === "GET" && path === "/reviews") return await handleListReviews();
+    if (req.method === "POST" && path === "/reviews") return await handleCreateReview(req);
 
     const holdRefreshMatch = path.match(/^\/holds\/([^/]+)\/refresh$/);
     if (req.method === "POST" && holdRefreshMatch) {

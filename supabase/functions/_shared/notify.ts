@@ -461,10 +461,15 @@ function tplBroadcast(
 ): RenderedMessage {
   const first = name?.trim().split(/\s+/)[0] || "there";
 
+  // The exit door. The waitlist popup promises no spam, and a promise like
+  // that needs a way out that a person can actually use: reply, Ebony sees
+  // it, and removes them from her dashboard (DELETE /admin/leads/:id).
+  const OPT_OUT_LINE = `Want off this list? Just reply and say so.`;
+
   const text = [`Hi ${first},`, ``];
   if (imageUrl) text.push(`See the flyer: ${imageUrl}`, ``);
   if (message) text.push(message, ``);
-  text.push(PHONE_LINE, ``, SITE_NAME);
+  text.push(PHONE_LINE, ``, SITE_NAME, OPT_OUT_LINE);
 
   let emailHtml: string | undefined;
   if (imageUrl) {
@@ -476,7 +481,11 @@ function tplBroadcast(
       `<p style="font-size:14px"><a href="${href}">Tap the picture to see it full size.</a></p>`,
     ];
     if (message) parts.push(`<p>${escapeHtml(message).replace(/\n/g, "<br>")}</p>`);
-    parts.push(`<p>${PHONE_LINE}</p>`, `<p>${SITE_NAME}</p>`);
+    parts.push(
+      `<p>${PHONE_LINE}</p>`,
+      `<p>${SITE_NAME}</p>`,
+      `<p style="font-size:12px;color:#8a7580">${OPT_OUT_LINE}</p>`,
+    );
     emailHtml =
       `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;` +
       `font-size:16px;line-height:1.5;max-width:560px">${parts.join("")}</div>`;
@@ -515,13 +524,24 @@ async function sendEmail(
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key || !to) return { status: "logged" };
   const from = Deno.env.get("NOTIFY_FROM_EMAIL") ?? "Sitting Pretty <onboarding@resend.dev>";
+  // Replies land with Ebony, not in a send-only void: the broadcast footer
+  // says "just reply", and that only works if reply-to is her real inbox.
+  const replyTo = Deno.env.get("NOTIFY_REPLY_TO") ??
+    (Deno.env.get("ADMIN_EMAILS") ?? "").split(",")[0].trim();
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       // text always goes along, so a mail app that refuses HTML still shows
       // the message and the flyer link.
-      body: JSON.stringify({ from, to: [to], subject, text: body, ...(html ? { html } : {}) }),
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        text: body,
+        ...(html ? { html } : {}),
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
     });
     if (!res.ok) return { status: "failed", error: `Resend ${res.status}: ${await res.text()}` };
     const data = await res.json();
@@ -733,8 +753,10 @@ export async function notifyHoldExpiredRefund(h: ExpiredHoldPayment): Promise<vo
   await deliverToOwner("hold_expired_refund", tplOwnerHoldExpiredRefund(h), null);
 }
 
+// id is null when the recipient is a lead from the waitlist, not a client:
+// the notification is still logged, just without a client to pin it to.
 export async function notifyBroadcast(
-  client: { id: string; email: string; name: string | null; phone: string | null },
+  client: { id: string | null; email: string; name: string | null; phone: string | null },
   subject: string,
   message: string,
   imageUrl: string | null = null,

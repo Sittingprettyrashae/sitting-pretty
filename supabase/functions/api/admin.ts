@@ -51,6 +51,20 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   if (req.method === "GET" && path === "/admin/clients") {
     return await listClients();
   }
+  if (req.method === "GET" && path === "/admin/leads") {
+    return await listLeads();
+  }
+  const leadDeleteMatch = path.match(/^\/admin\/leads\/([^/]+)$/);
+  if (req.method === "DELETE" && leadDeleteMatch) {
+    return await removeLead(leadDeleteMatch[1]);
+  }
+  if (req.method === "GET" && path === "/admin/reviews") {
+    return await listReviews();
+  }
+  const reviewStatusMatch = path.match(/^\/admin\/reviews\/([^/]+)\/status$/);
+  if (req.method === "POST" && reviewStatusMatch) {
+    return await setReviewStatus(req, reviewStatusMatch[1]);
+  }
   if (req.method === "POST" && path === "/admin/broadcast") {
     return await broadcast(req);
   }
@@ -258,32 +272,136 @@ async function listClients(): Promise<Response> {
   return json({ clients });
 }
 
-// POST /admin/broadcast { subject, message, image? } -> { sent, image_url? }
+// GET /admin/leads -> { leads: [{id, name, email, phone, source, ts}] }
+// Her waitlist: people the popup collected who have not booked yet. Newest
+// first so the freshest interest is on top.
+async function listLeads(): Promise<Response> {
+  const res = await adminDb()
+    .from("leads")
+    .select("id, name, email, phone, source, created_at")
+    .order("created_at", { ascending: false });
+  if (res.error) throw new HttpError(500, "Could not load your waitlist");
+  const leads = (res.data ?? []).map((l) => ({
+    id: l.id,
+    name: l.name,
+    email: l.email,
+    phone: l.phone,
+    source: l.source,
+    ts: l.created_at,
+  }));
+  return json({ leads });
+}
+
+// DELETE /admin/leads/:id -> { leads } (the fresh list)
+// The exit door the popup's "no spam" promise leans on: someone asks off the
+// list, she removes them in one tap.
+async function removeLead(leadId: string): Promise<Response> {
+  const res = await adminDb().from("leads").delete().eq("id", leadId);
+  if (res.error) throw new HttpError(500, "Could not remove that person");
+  return await listLeads();
+}
+
+// GET /admin/reviews -> { reviews: [{id, name, service, rating, body, status, ts}] }
+// Every review, pending first — ordered in SQL, BEFORE the limit, so pending
+// rows can never be pushed out of the window by a pile of approved or hidden
+// ones ('pending' > 'hidden' > 'approved' descending, conveniently).
+async function listReviews(): Promise<Response> {
+  const res = await adminDb()
+    .from("reviews")
+    .select("id, name, service, rating, body, status, created_at")
+    .order("status", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (res.error) throw new HttpError(500, "Could not load reviews");
+  const rows = (res.data ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    service: r.service,
+    rating: r.rating,
+    body: r.body,
+    status: r.status,
+    ts: r.created_at,
+  }));
+  return json({ reviews: rows });
+}
+
+// POST /admin/reviews/:id/status { status: approved|hidden|pending } -> { review }
+async function setReviewStatus(req: Request, reviewId: string): Promise<Response> {
+  const body = await readJson(req);
+  const status = String(body.status ?? "");
+  if (!["approved", "hidden", "pending"].includes(status)) {
+    throw new HttpError(400, "status must be approved, hidden, or pending");
+  }
+  const res = await adminDb()
+    .from("reviews")
+    .update({ status })
+    .eq("id", reviewId)
+    .select("id, name, service, rating, body, status, created_at")
+    .maybeSingle();
+  if (res.error) throw new HttpError(500, "Could not update that review");
+  if (!res.data) throw new HttpError(404, "Review not found");
+  const r = res.data;
+  return json({
+    review: {
+      id: r.id,
+      name: r.name,
+      service: r.service,
+      rating: r.rating,
+      body: r.body,
+      status: r.status,
+      ts: r.created_at,
+    },
+  });
+}
+
+// POST /admin/broadcast { subject, message, image?, include_leads? }
+//   -> { sent, image_url? }
 //
 // One message to every client, with an optional flyer. A flyer on its own is
-// a valid send: sometimes the picture IS the message.
+// a valid send: sometimes the picture IS the message. With include_leads the
+// waitlist gets it too, minus anyone who is already a client, so nobody hears
+// the same message twice.
 async function broadcast(req: Request): Promise<Response> {
   const body = await readJson(req);
   const subject = typeof body.subject === "string" ? body.subject.trim() : "";
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const image = typeof body.image === "string" ? body.image.trim() : "";
+  const includeLeads = body.include_leads === true;
   if (!subject && !message && !image) {
     throw new HttpError(400, "Add a subject, a message, or a flyer before you send.");
   }
 
-  // Store the flyer BEFORE anything goes out. If the picture is too big or the
-  // upload fails, she gets one plain error and nobody has been messaged yet;
-  // uploading partway through the list would send some clients the flyer and
-  // the rest the same words with nothing attached.
+  // EVERYTHING that can fail happens BEFORE anyone is messaged: the flyer
+  // upload, the clients load, and the waitlist load. A failure here gives her
+  // one plain error with nobody contacted, so pressing Send again is always
+  // safe. Failing between the two lists would leave the composer loaded after
+  // a partial send — one more tap and every client gets the message twice.
   const imageUrl = image ? await storeFlyer(image) : null;
 
   const db = adminDb();
   const clientsRes = await db.from("clients").select("id, email, name, phone").eq("is_admin", false);
   if (clientsRes.error) throw new HttpError(500, "Could not load clients");
 
+  const clients = clientsRes.data ?? [];
+  const clientEmails = new Set(clients.map((c) => String(c.email ?? "").toLowerCase()));
+  const leads: Array<{ name: string; email: string; phone: string | null }> = [];
+  if (includeLeads) {
+    const leadsRes = await db.from("leads").select("name, email, phone");
+    if (leadsRes.error) throw new HttpError(500, "Could not load your waitlist. Nothing was sent.");
+    for (const lead of leadsRes.data ?? []) {
+      const email = String(lead.email ?? "").toLowerCase();
+      if (!email || clientEmails.has(email)) continue;
+      leads.push({ name: lead.name, email: lead.email, phone: lead.phone ?? null });
+    }
+  }
+
   let sent = 0;
-  for (const client of clientsRes.data ?? []) {
+  for (const client of clients) {
     await notifyBroadcast(client, subject, message, imageUrl);
+    sent += 1;
+  }
+  for (const lead of leads) {
+    await notifyBroadcast({ id: null, ...lead }, subject, message, imageUrl);
     sent += 1;
   }
 

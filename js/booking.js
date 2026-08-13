@@ -313,6 +313,9 @@
     } else if (S.mode === "mybookings") {
       if (!ready()) S.steps.push("who");
       S.steps.push("list");
+    } else if (S.mode === "leavereview") {
+      if (!ready()) S.steps.push("who");
+      S.steps.push("rate");
     }
   }
   // Log in is the default every time the account step opens fresh: most people
@@ -334,8 +337,15 @@
     if (SP.hasToken() && !me) { try { me = await SP.me(); syncNav(); } catch (e) {} }
     setSteps(); openSheet(); render();
   }
+  async function openLeaveReview() {
+    if (offline) { window.location.href = `sms:${PHONE}?body=${encodeURIComponent("Hi Ebony! About my last visit: ")}`; return; }
+    S.mode = "leavereview"; S.idx = 0;
+    resetAuthUi();
+    if (SP.hasToken() && !me) { try { me = await SP.me(); syncNav(); } catch (e) {} }
+    setSteps(); openSheet(); render();
+  }
 
-  const TITLES = { service: "Pick your style", when: "Pick your day & time", who: "Your info", review: "Confirm your booking", list: "My bookings", done: "" };
+  const TITLES = { service: "Pick your style", when: "Pick your day & time", who: "Your info", review: "Confirm your booking", list: "My bookings", rate: "How was your visit?", done: "" };
   const titleFor = (step) => step === "who" && !(me && me.client) ? "Your account" : TITLES[step];
 
   function render(doneCfg) {
@@ -348,7 +358,7 @@
     dots.innerHTML = (S.mode === "book" && !doneCfg) ? S.steps.map((_, i) => `<i class="${i <= S.idx ? "on" : ""}"></i>`).join("") : "";
     const body = $("#sheetBody"); const foot = $("#sheetFoot");
     body.innerHTML = ""; foot.innerHTML = "";
-    ({ service: rService, when: rWhen, who: rWho, review: rReview, list: rList, done: rDone })[step](body, foot, doneCfg);
+    ({ service: rService, when: rWhen, who: rWho, review: rReview, list: rList, rate: rRate, done: rDone })[step](body, foot, doneCfg);
     body.scrollTop = 0;
     // The dialog is labelled by this heading; move focus to it whenever the
     // step changes so screen readers hear where they landed.
@@ -507,7 +517,7 @@
     syncNav();
     if (S.pendingProfile || S.offerPassword) { setSteps(); S.idx = S.steps.indexOf("who"); render(); return; }
     setSteps();
-    const target = S.mode === "book" ? "review" : "list";
+    const target = S.mode === "book" ? "review" : S.mode === "leavereview" ? "rate" : "list";
     const i = S.steps.indexOf(target);
     S.idx = i < 0 ? S.steps.length - 1 : i;
     render();
@@ -991,6 +1001,59 @@
     }
   }
 
+  // ----- step: rate (leave a review) -----
+  // Signed-in clients only (the who step runs first). The name on the review
+  // comes from the account server-side, and nothing shows on the site until
+  // Ebony approves it in her dashboard.
+  function rRate(body, foot) {
+    const c = me && me.client;
+    // Their words survive a session hiccup: the submit handler stashes the
+    // draft before forcing a re-sign-in, and this render restores it.
+    const draft = S.rvDraft || {};
+    body.appendChild(el(`<p class="lead-note">Thank you${c && c.name ? ", " + esc(c.name.split(/\s+/)[0]) : ""}! Tap your stars, say a few words, and it shows up on the site once Ebony approves it.</p>`));
+    body.appendChild(el(`<h4>Your rating</h4>`));
+    const stars = el(`<div role="radiogroup" aria-label="Star rating" style="display:flex;gap:.35rem"></div>`);
+    let rating = draft.rating || 5;
+    const paint = () => stars.querySelectorAll("button").forEach((b, i) => {
+      b.style.color = i < rating ? "var(--champagne)" : "var(--line-strong)";
+      b.setAttribute("aria-checked", i + 1 === rating ? "true" : "false");
+    });
+    for (let i = 1; i <= 5; i++) {
+      const b = el(`<button type="button" role="radio" aria-label="${i} star${i > 1 ? "s" : ""}" style="background:none;border:none;font-size:1.9rem;cursor:pointer;padding:.15rem;line-height:1">&#9733;</button>`);
+      b.addEventListener("click", () => { rating = i; paint(); });
+      stars.appendChild(b);
+    }
+    paint();
+    body.appendChild(stars);
+    body.appendChild(el(`<div class="field" style="margin-top:1rem"><label for="rvService">What did she do for you? (optional)</label><input id="rvService" placeholder="Knotless braids, wig install, sew-in..." maxlength="120" value="${esc(draft.service || "")}"></div>`));
+    body.appendChild(el(`<div class="field"><label for="rvBody">Your words</label><textarea id="rvBody" rows="4" maxlength="1200" placeholder="How did it go? How did it hold up?">${esc(draft.body || "")}</textarea></div>`));
+    const go = el(`<button type="button" class="btn btn-solid">Send my review</button>`);
+    foot.appendChild(go);
+    go.addEventListener("click", async () => {
+      if (go.disabled) return;
+      const text = $("#rvBody", body).value.trim();
+      const service = $("#rvService", body).value.trim();
+      if (text.length < 5) return msg(foot, "Say a few words about your visit first.", true);
+      go.disabled = true; msg(foot, "Sending...");
+      const seq = opSeq;
+      try {
+        await SP.request("/api/reviews", { method: "POST", body: { rating, body: text, service } });
+        if (stale(seq)) return;
+        S.rvDraft = null;
+        render({ title: "Thank you!", icon: "♥", head: "Ebony's got your review", copy: "It shows up on the site as soon as she approves it. Thank you for taking the time!" });
+      } catch (e) {
+        if (stale(seq)) return;
+        if (isAuthLoss(e)) {
+          S.rvDraft = { rating, service, body: text };
+          handleSessionLoss(); render();
+          msg($("#sheetFoot"), "Your sign-in expired. Sign back in and your review is saved right here.", true);
+          return;
+        }
+        msg(foot, e.message, true); go.disabled = false;
+      }
+    });
+  }
+
   // ----- step: done -----
   function rDone(body, foot, cfg) {
     body.appendChild(el(`
@@ -1086,6 +1149,44 @@
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeAcctMenu(); });
   }
 
+  // The signature cards ship with her real menu minimums baked into the HTML;
+  // once the live catalog lands, re-derive each "from $X" so a price change on
+  // her menu updates the cards without anyone touching the markup. data-match
+  // narrows a card to part of a category (Knotless within Braids).
+  function paintSignaturePrices() {
+    if (!catalog || !catalog.length) return;
+    document.querySelectorAll(".sig-card").forEach(card => {
+      const group = catalog.find(g => g.cat === card.getAttribute("data-cat"));
+      if (!group) return;
+      const match = (card.getAttribute("data-match") || "").toLowerCase();
+      const items = match ? group.items.filter(i => i.name.toLowerCase().includes(match)) : group.items;
+      const mins = items
+        .map(i => { const m = /\$(\d+)/.exec(i.price || ""); return m ? parseInt(m[1], 10) : NaN; })
+        .filter(n => !isNaN(n));
+      const label = card.querySelector("[data-from]");
+      if (mins.length && label) label.textContent = "from $" + Math.min(...mins);
+    });
+  }
+
+  // The signature cards up top land the visitor on that category with its
+  // price list already open, mid-scroll, one tap from booking.
+  function openCategory(catName) {
+    const acc = $("#servicesAcc");
+    if (!acc) return;
+    if (offline) { window.location.href = smsFor(catName); return; }
+    const btns = acc.querySelectorAll(".acc-btn");
+    for (const btn of btns) {
+      const label = btn.querySelector("span");
+      if (label && label.textContent.trim() === catName) {
+        if (!btn.parentElement.classList.contains("open")) btn.click();
+        else btn.parentElement.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        return;
+      }
+    }
+    // Category name not found (renamed upstream): still land on the price list.
+    document.getElementById("services").scrollIntoView({ behavior: "smooth" });
+  }
+
   // ---------- boot ----------
   async function boot() {
     // Her hours first and unawaited: the table on the page and the day strip
@@ -1093,12 +1194,18 @@
     loadHours();
     await loadCatalog();
     buildAccordion();
+    paintSignaturePrices();
     wireNav();
     // demo ribbon
     try { await SP.request("/api/_outbox"); demoMode = true; $("#demoRibbon").style.display = "block"; } catch (e) {}
     if (offline) { const b = $("#navMyBookings"); if (b) b.style.display = "none"; }
     document.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBooking(null)));
     $("#navMyBookings").addEventListener("click", openMyBookings);
+    document.querySelectorAll(".sig-card").forEach(card => {
+      card.addEventListener("click", () => openCategory(card.getAttribute("data-cat")));
+    });
+    const lr = $("#leaveReview");
+    if (lr) lr.addEventListener("click", openLeaveReview);
 
     // Sessions are long lived, so pick the client back up before anything else.
     if (!offline && SP.hasToken()) {

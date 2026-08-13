@@ -343,6 +343,7 @@ function defaultDb() {
   return {
     clients: [], bookings: [], sessions: {}, codes: {}, oauth_states: {},
     checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [], holds: [],
+    leads: [], reviews: [],
     hours: defaultHours(), seq: {}
   };
 }
@@ -358,6 +359,8 @@ function normalizeDb() {
   // an existing database rather than a fresh one.
   if (!Array.isArray(db.holds)) db.holds = [];
   if (!Array.isArray(db.blocked_days)) db.blocked_days = [];
+  if (!Array.isArray(db.leads)) db.leads = [];
+  if (!Array.isArray(db.reviews)) db.reviews = [];
   if (!Array.isArray(db.outbox)) db.outbox = [];
   if (!db.checkout_sessions) db.checkout_sessions = {};
   if (!db.codes) db.codes = {};
@@ -1256,6 +1259,17 @@ function cleanStr(v, max) {
   return v.trim().slice(0, max || 200);
 }
 
+// Per-IP throttle on the one public write, mirroring production (community.ts).
+const leadBucket = new Map();
+function throttleLead(req) {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const b = leadBucket.get(ip);
+  if (!b || now > b.reset) { leadBucket.set(ip, { count: 1, reset: now + 60000 }); return; }
+  b.count += 1;
+  if (b.count > 6) throw new ApiError(429, 'Too many tries. Please wait a minute and try again.');
+}
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
@@ -1758,6 +1772,84 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { checkout_url: absolute, amount_cents: balance });
   }
 
+  // The popup's waitlist. Anyone can join; duplicates answer like fresh
+  // signups so the popup can never be used to probe who is on the list.
+  // Same throttle, honeypot, and phone rules as production (community.ts).
+  if (method === 'POST' && p === '/api/leads') {
+    throttleLead(req);
+    const body = await readBody(req);
+    const name = cleanStr(body.name, 120);
+    const email = cleanStr(body.email, 254).toLowerCase();
+    const rawPhone = cleanStr(body.phone, 40);
+    const source = cleanStr(body.source, 40) || 'popup';
+    // Honeypot: no person ever fills this invisible field. ANY non-empty
+    // value, string or not, is a bot: cheerful yes, no row.
+    if (body.company != null && String(body.company).trim() !== '') {
+      return sendJson(res, 200, { ok: true });
+    }
+    if (name.length < 2) throw new ApiError(400, 'Tell us your name so Ebony knows who you are.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      throw new ApiError(400, 'That email does not look right. Check it and try again.');
+    }
+    let phone = '';
+    if (rawPhone) {
+      const digits = rawPhone.replace(/\D/g, '');
+      if (digits.length < 10 || digits.length > 15) {
+        throw new ApiError(400, 'That phone number does not look right. Check it, or leave it blank.');
+      }
+      phone = rawPhone;
+    }
+    if (!db.leads.some((l) => l.email === email)) {
+      db.leads.push({
+        id: nextId('ld'), name, email, phone: phone || null, source,
+        ts: new Date().toISOString()
+      });
+      save();
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // Approved reviews only: what the public site prints. First name + last
+  // initial, same as production: reviewers are clients, not public figures.
+  if (method === 'GET' && p === '/api/reviews') {
+    const shortName = (full) => {
+      const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+      if (parts.length < 2) return parts[0] || '';
+      return parts[0] + ' ' + parts[parts.length - 1][0].toUpperCase() + '.';
+    };
+    const reviews = db.reviews
+      .filter((r) => r.status === 'approved')
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
+      .slice(0, 60)
+      .map((r) => ({ name: shortName(r.name), service: r.service, rating: r.rating, body: r.body, ts: r.ts }));
+    return sendJson(res, 200, { reviews, count: reviews.length });
+  }
+
+  // Signed-in clients only; the name is snapshotted from the profile and every
+  // save goes back to pending until Ebony approves it. One review per client,
+  // the latest wins — same as production's upsert on client_id.
+  if (method === 'POST' && p === '/api/reviews') {
+    const client = requireAuth(req);
+    const body = await readBody(req);
+    const rating = Number(body.rating);
+    const text = cleanStr(body.body, 1200);
+    const service = cleanStr(body.service, 120);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new ApiError(400, 'Pick a star rating from 1 to 5.');
+    }
+    if (text.length < 5) throw new ApiError(400, 'Tell us a little about your visit first.');
+    const existing = db.reviews.find((r) => r.client_id === client.id);
+    const fields = {
+      name: client.name || client.email.split('@')[0],
+      service, rating, body: text, status: 'pending',
+      ts: new Date().toISOString()
+    };
+    if (existing) Object.assign(existing, fields);
+    else db.reviews.push({ id: nextId('rv'), client_id: client.id, ...fields });
+    save();
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (method === 'POST' && p === '/api/stripe/webhook') {
     // DEMO: signature is NOT verified. Production must verify
     // Stripe-Signature with the webhook signing secret before trusting this.
@@ -1891,6 +1983,52 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { clients });
   }
 
+  // Her waitlist, newest first.
+  if (method === 'GET' && p === '/api/admin/leads') {
+    requireAdmin(req);
+    const leads = db.leads.slice()
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
+      .map((l) => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, source: l.source, ts: l.ts }));
+    return sendJson(res, 200, { leads });
+  }
+
+  // Someone asked off the list: one tap and they are gone.
+  if (method === 'DELETE' && (m = /^\/api\/admin\/leads\/([\w-]+)$/.exec(p))) {
+    requireAdmin(req);
+    db.leads = db.leads.filter((l) => l.id !== m[1]);
+    save();
+    const leads = db.leads.slice()
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
+      .map((l) => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, source: l.source, ts: l.ts }));
+    return sendJson(res, 200, { leads });
+  }
+
+  // Every review whatever its status, pending first so new ones are seen.
+  if (method === 'GET' && p === '/api/admin/reviews') {
+    requireAdmin(req);
+    const reviews = db.reviews.slice()
+      .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
+      .sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1))
+      .map((r) => ({ id: r.id, name: r.name, service: r.service, rating: r.rating, body: r.body, status: r.status, ts: r.ts }));
+    return sendJson(res, 200, { reviews });
+  }
+
+  if (method === 'POST' && (m = /^\/api\/admin\/reviews\/([\w-]+)\/status$/.exec(p))) {
+    requireAdmin(req);
+    const body = await readBody(req);
+    const status = cleanStr(body.status, 20);
+    if (!['approved', 'hidden', 'pending'].includes(status)) {
+      throw new ApiError(400, 'status must be approved, hidden, or pending');
+    }
+    const review = db.reviews.find((r) => r.id === m[1]);
+    if (!review) throw new ApiError(404, 'Review not found');
+    review.status = status;
+    save();
+    return sendJson(res, 200, {
+      review: { id: review.id, name: review.name, service: review.service, rating: review.rating, body: review.body, status: review.status, ts: review.ts }
+    });
+  }
+
   if (method === 'POST' && p === '/api/admin/broadcast') {
     requireAdmin(req);
     const body = await readBody(req, {
@@ -1910,11 +2048,23 @@ async function handleApi(req, res, url) {
     const imageUrl = hasImage ? saveFlyer(body.image) : null;
     const imageLink = imageUrl ? origin + imageUrl : null;
     let sent = 0;
+    const clientEmails = new Set();
     for (const c of db.clients) {
       if (c.is_admin) continue;
+      clientEmails.add(String(c.email || '').toLowerCase());
       notify('broadcast', { email: c.email, phone: c.phone, name: c.name },
         { subject, message, image_url: imageLink });
       sent += 1;
+    }
+    // The waitlist hears it too when she asks, minus anyone who has since
+    // become a client, so nobody gets the same message twice.
+    if (body.include_leads === true) {
+      for (const l of db.leads) {
+        if (clientEmails.has(String(l.email || '').toLowerCase())) continue;
+        notify('broadcast', { email: l.email, phone: l.phone, name: l.name },
+          { subject, message, image_url: imageLink });
+        sent += 1;
+      }
     }
     db.broadcasts.push({
       ts: new Date().toISOString(), subject, message,
