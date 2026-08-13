@@ -115,17 +115,17 @@ editorial beauty portrait of a Black woman with deep chestnut-brown skin and a f
 
 **7. Hero, small polaroid — `hero/back.jpg`**
 
-The one slot where a tight crop is the point: it sits over the big portrait
-like a small polaroid and reads at thumbnail size, so it wants one bold
-texture, not a scene.
+Sits over the big portrait like a small polaroid. It reads at thumbnail size,
+so it wants one clear subject, but no close-up: a back three-quarter view
+showing the whole braid pattern is the classic second shot of a hair campaign.
 
 ```
-extreme close-up beauty photograph of perfectly defined glossy knotless braids on a Black woman with warm brown skin, tight crop filling the square frame with braid texture, elegant manicured fingers holding a single braid across the frame, clean precise parts, small gold cuffs catching warm light, rich deep shine on every braid, warm ivory and blush tones in the soft-focus background, macro beauty photography, luxurious haircare campaign detail shot --ar 1:1 --style raw --s 120 --no deformed hands, extra fingers, text, watermark, face
+editorial beauty photograph of a Black woman with warm brown skin seen from behind at a three-quarter angle, long medium knotless braids with clean precise parts covering the whole back of her head and falling down her back, small gold cuffs catching warm light, rich deep shine on every braid, one hand sweeping a few braids over her shoulder, head turned slightly showing the edge of her profile, medium shot from head to mid-back, the full braid pattern visible inside the frame, warm ivory backdrop with blush rosewater tones, soft diffused beauty-dish lighting with champagne highlights, high-end salon campaign photography --ar 1:1 --style raw --s 120 --no extreme close-up, tight crop, macro, deformed hands, extra fingers, text, watermark
 ```
 
-If the braids detail feels repetitive next to the knotless card, swap the
-subject words for "silk-pressed curls" or "body-wave sew-in curls" and keep
-everything else identical.
+If the braids feel repetitive next to the knotless card, swap the subject
+words for "silk-pressed hair" or "body-wave sew-in curls" and keep everything
+else identical.
 
 ## Check them before you push
 
