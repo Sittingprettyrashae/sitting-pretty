@@ -61,6 +61,14 @@ different women, not one model re-rendered. Keep those descriptors when you
 tweak a prompt, and if two renders come back looking like the same woman,
 re-roll one rather than shipping twins.
 
+## Posing
+
+No passport photos: every prompt gives its model a real hair-campaign pose
+(fingers through the lengths, braids gathered over a shoulder, curls being
+scrunched, a mid-flip, fingers lifting the roots). Poses mean hands, and hands
+are where AI slips, so every prompt also carries `--no deformed hands, extra
+fingers` — still, check fingers before shipping any render.
+
 ## Series consistency
 
 Run all seven in one session. Once the first image comes out right, reuse it
@@ -71,27 +79,27 @@ and grade match across the set.
 
 **1. Wig Installs — `wigs.jpg`**
 ```
-editorial beauty portrait of a Black woman with deep espresso skin and a flawlessly melted lace frontal wig install, long jet-black body-wave hair with glossy sheen, hairline perfectly natural, chin tilted slightly up, serene confident expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the entire hairstyle visible from the crown to the very ends inside the frame, subject centered with clear backdrop space on the left and right of the hair, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, text, watermark
+editorial beauty portrait of a Black woman with deep espresso skin and a flawlessly melted lace frontal wig install, long jet-black body-wave hair with glossy sheen, hairline perfectly natural, one elegant manicured hand sliding through the lengths of her hair mid-motion, head tilted so the hair sweeps to one side, serene confident expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the entire hairstyle visible from the crown to the very ends inside the frame, subject centered with clear backdrop space on the left and right of the hair, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, deformed hands, extra fingers, text, watermark
 ```
 
 **2. Knotless Braids — `knotless.jpg`**
 ```
-editorial beauty portrait of a Black woman with warm honey-brown skin and long medium knotless braids, clean precise parts, small gold cuffs catching light, braids falling close to the body, soft confident expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the complete length of the braids visible from the scalp parts to the very ends inside the frame, subject centered with clear backdrop space on the left and right of the braids, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off braids, text, watermark
+editorial beauty portrait of a Black woman with warm honey-brown skin and long medium knotless braids, clean precise parts, small gold cuffs catching light, both hands gently gathering the braids over one shoulder, glancing back over her shoulder at the camera, soft confident expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the complete length of the braids visible from the scalp parts to the very ends inside the frame, subject centered with clear backdrop space on the left and right of the braids, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off braids, deformed hands, extra fingers, text, watermark
 ```
 
 **3. Crochet — `crochet.jpg`**
 ```
-editorial beauty portrait of a Black woman with rich mahogany-brown skin and voluminous curly crochet braids, springy defined passion-twist curls framing her face, joyful relaxed expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the whole shape of the style visible from crown to ends inside the frame, subject centered with clear backdrop space on the left and right so the curls never touch the edges, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off curls, text, watermark
+editorial beauty portrait of a Black woman with rich mahogany-brown skin and voluminous curly crochet braids, springy defined passion-twist curls framing her face, hands lifted scrunching the curls at both sides of her head, head tipped back mid-laugh, joyful relaxed expression, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the whole shape of the style visible from crown to ends inside the frame, subject centered with clear backdrop space on the left and right so the curls never touch the edges, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off curls, deformed hands, extra fingers, text, watermark
 ```
 
 **4. Quickweaves — `quickweave.jpg`**
 ```
-editorial beauty portrait of a Black woman with golden caramel skin and a sleek chin-length black bob quickweave, sharp side part, mirror-glossy finish, poised expression with eyes to camera, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the entire bob shape visible inside the frame, subject centered with clear backdrop space on the left and right, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, text, watermark
+editorial beauty portrait of a Black woman with golden caramel skin and a sleek chin-length black bob quickweave, sharp side part, mirror-glossy finish, one hand tucking the bob behind her ear, opposite shoulder raised toward her chin, poised expression with eyes to camera, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the entire bob shape visible inside the frame, subject centered with clear backdrop space on the left and right, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, deformed hands, extra fingers, text, watermark
 ```
 
 **5. Sew-Ins — `sewin.jpg`**
 ```
-editorial beauty portrait of a Black woman with smooth cocoa-brown skin and a long layered sew-in install, loose glamorous curls with deep shine falling over one shoulder, warm confident gaze, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the full length of the hair visible from the part down to the curled ends inside the frame, subject centered with clear backdrop space on the left and right, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, text, watermark
+editorial beauty portrait of a Black woman with smooth cocoa-brown skin and a long layered sew-in install, caught mid hair-flip with the loose glamorous curls in motion, one hand sweeping the hair over her shoulder, deep shine on every curl, warm confident gaze, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, the full length of the hair visible from the part down to the curled ends inside the frame, subject centered with clear backdrop space on the left and right, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, deformed hands, extra fingers, text, watermark
 ```
 
 ## The hero prompts
@@ -102,7 +110,7 @@ Renders at exactly 4:5, completely uncropped. Keep the hair's ends out of the
 bottom-left corner: the box's bottom-left is clipped by a large rounded sweep.
 
 ```
-editorial beauty portrait of a Black woman with deep chestnut-brown skin and a flawlessly installed long curly lace frontal, big bouncy defined curls with brilliant shine, radiant expression, chin tilted slightly up, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, face in the upper half of the frame, the entire hairstyle visible from crown to the very ends inside the frame, curls kept clear of the bottom-left corner, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, text, watermark
+editorial beauty portrait of a Black woman with deep chestnut-brown skin and a flawlessly installed long curly lace frontal, big bouncy defined curls with brilliant shine, one arm raised with fingers buried in the roots lifting the curls, elbow out in a classic hair-campaign pose, radiant expression, chin tilted slightly up, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones in the background, high-end salon campaign photography, medium shot with the camera pulled back, head and shoulders down to the ribcage, face in the upper half of the frame, the entire hairstyle visible from crown to the very ends inside the frame, curls kept clear of the bottom-left corner, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no extreme close-up, tight crop, cropped hair, cut off hair, deformed hands, extra fingers, text, watermark
 ```
 
 **7. Hero, small polaroid — `hero/back.jpg`**
@@ -112,7 +120,7 @@ like a small polaroid and reads at thumbnail size, so it wants one bold
 texture, not a scene.
 
 ```
-extreme close-up beauty photograph of perfectly defined glossy knotless braids on a Black woman with warm brown skin, tight crop filling the square frame with braid texture, clean precise parts, small gold cuffs catching warm light, rich deep shine on every braid, warm ivory and blush tones in the soft-focus background, macro beauty photography, luxurious haircare campaign detail shot --ar 1:1 --style raw --s 120 --no text, watermark, face
+extreme close-up beauty photograph of perfectly defined glossy knotless braids on a Black woman with warm brown skin, tight crop filling the square frame with braid texture, elegant manicured fingers holding a single braid across the frame, clean precise parts, small gold cuffs catching warm light, rich deep shine on every braid, warm ivory and blush tones in the soft-focus background, macro beauty photography, luxurious haircare campaign detail shot --ar 1:1 --style raw --s 120 --no deformed hands, extra fingers, text, watermark, face
 ```
 
 If the braids detail feels repetitive next to the knotless card, swap the
