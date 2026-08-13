@@ -44,6 +44,15 @@ Two rules that matter more than any adjective:
 Generate at `--ar 4:5`. Do not switch to a taller ratio: it saves the sides but
 starts cutting the bottom of the hair on hover, which is worse.
 
+## Making them look real, not AI
+
+The fastest tells of an AI image are porcelain-smooth skin, identical cloned
+curls, dead-center symmetry, and soft shadowless "campaign" light. Every
+prompt below fights those four directly: film stock and grain, visible pores
+and flyaways, varied imperfect texture, directional light with real shadows,
+and poses that are not a straight-to-camera catalog smile. If a render still
+feels synthetic, drop stylize further (`--s 50`) before changing the words.
+
 ## Series consistency
 
 Run all five in one session. Once the first image comes out right, reuse it as
@@ -57,27 +66,27 @@ tones, soft champagne highlights; skin rich and true, never gray or washed out.
 
 **1. Wig Installs — `wigs.jpg`**
 ```
-full-length beauty portrait of a dark-skinned Black woman with a flawlessly melted lace frontal wig install, long jet-black body-wave hair with glossy sheen, the entire length of the hair visible from crown to ends well inside the frame, hairline perfectly natural, serene confident expression, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory seamless studio backdrop, soft diffused beauty-dish lighting with champagne highlights, subtle rosewater pink tones, shot on 85mm, high-end salon campaign photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off hair, text, watermark
+editorial fashion magazine portrait of a dark-skinned Black woman with a melted lace frontal wig install, long jet-black body-wave hair, natural varied wave pattern with a few flyaway strands, the entire length of the hair visible from crown to ends well inside the frame, calm direct gaze with a hint of attitude, chin slightly angled, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory backdrop with rosewater tones, hard directional window light with soft falling shadows, real skin texture with visible pores and natural sheen, shot on medium format film, Kodak Portra 400, subtle grain, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off hair, airbrushed skin, plastic skin, text, watermark
 ```
 
 **2. Knotless Braids — `knotless.jpg`**
 ```
-full-length beauty portrait of a dark-skinned Black woman with long medium knotless braids, the complete length of the braids visible from the scalp parts all the way to the ends inside the frame, braids falling straight down close to the body, clean precise parts, small gold cuffs catching light, soft confident smile, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory studio backdrop with a blush pink gradient, soft window-style diffused light, glowing moisturized skin, shot on 85mm f2, luxury haircare campaign photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off braids, text, watermark
+editorial fashion magazine portrait of a dark-skinned Black woman with long medium knotless braids, the complete length of the braids visible from the scalp parts all the way to the ends inside the frame, braids falling close to the body with natural slight unevenness, a few baby hairs at the hairline, small gold cuffs, quiet self-assured expression looking just past the camera, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory backdrop with a blush wash, directional daylight through a window with true shadows, real skin texture with visible pores, shot on medium format film, Kodak Portra 400, subtle grain, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off braids, airbrushed skin, plastic skin, text, watermark
 ```
 
 **3. Crochet — `crochet.jpg`**
 ```
-full-length beauty portrait of a dark-skinned Black woman with voluminous curly crochet braids, the whole shape of the style visible from crown to ends inside the frame, springy defined passion-twist curls framing her face, joyful relaxed expression, head and shoulders to mid-torso, subject centered with generous empty space on the left and right so the curls never touch the edges, warm ivory seamless backdrop with soft rosewater pink wash, airy diffused studio light with champagne rim light on the curls, shot on 85mm, high-end beauty editorial photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off curls, text, watermark
+editorial fashion magazine portrait of a dark-skinned Black woman with voluminous curly crochet braids, the whole shape of the style visible from crown to ends inside the frame, springy passion-twist curls with naturally varied definition, some tight and some loosening, a few frizzy strands catching the light, caught mid-laugh looking away from camera, head and shoulders to mid-torso, subject centered with generous empty space on the left and right so the curls never touch the edges, warm ivory backdrop with a rosewater wash, hard rim light from one side with soft fill, real skin texture with visible pores and natural sheen, shot on medium format film, Kodak Portra 800, subtle grain, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off curls, airbrushed skin, plastic skin, identical curls, text, watermark
 ```
 
 **4. Quickweaves — `quickweave.jpg`**
 ```
-full-length beauty portrait of a dark-skinned Black woman with a sleek chin-length black bob quickweave, the entire bob shape visible inside the frame, sharp side part, mirror-glossy finish, clean dramatic silhouette, poised expression with eyes to camera, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory studio backdrop with a soft blush gradient, precise soft beauty lighting with a gentle champagne kicker, shot on 85mm, luxury salon campaign photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off hair, text, watermark
+editorial fashion magazine portrait of a dark-skinned Black woman with a sleek chin-length black bob quickweave, the entire bob shape visible inside the frame, sharp side part, glossy finish with individual hair strands visible, strong poised expression, chin tilted, direct on-camera flash with a crisp shadow behind her on the wall, nineties fashion editorial energy, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory backdrop with a blush cast, real skin texture with visible pores and natural highlights, shot on film, subtle grain, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off hair, airbrushed skin, plastic skin, text, watermark
 ```
 
 **5. Sew-Ins — `sewin.jpg`**
 ```
-full-length beauty portrait of a dark-skinned Black woman with a long layered sew-in install, the full length of the hair visible from the part down to the curled ends inside the frame, loose glamorous curls with deep shine falling over one shoulder, warm confident gaze, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory seamless backdrop with rosewater pink tones, soft wraparound diffused light, glowing skin with champagne highlights, shot on 85mm f2, high-end beauty editorial photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off hair, text, watermark
+editorial fashion magazine portrait of a dark-skinned Black woman with a long layered sew-in install, the full length of the hair visible from the part down to the curled ends inside the frame, loose lived-in curls with varied direction and a few strands out of place, hair caught in slight motion as she turns toward the camera, warm knowing gaze, head and shoulders to mid-torso, subject centered with generous empty space on the left and right, warm ivory backdrop with rosewater tones, directional golden-hour window light with real falling shadows, real skin texture with visible pores and natural sheen, shot on medium format film, Kodak Portra 400, subtle grain, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off hair, airbrushed skin, plastic skin, text, watermark
 ```
 
 ## The hero prompts
@@ -94,8 +103,13 @@ rounded sweep, so keep the hair's ends and anything important out of that
 corner. Face belongs in the upper half.
 
 ```
-full-length beauty portrait of a dark-skinned Black woman with a flawlessly installed long curly lace frontal, big bouncy defined curls with brilliant shine, the entire hairstyle visible from crown to ends inside the frame, radiant genuine smile, glowing flawless makeup, head and shoulders to mid-torso, subject centered, face in the upper half of the frame, curls kept clear of the bottom-left corner, warm ivory seamless studio backdrop with a rosewater pink gradient, soft wraparound diffused light with champagne highlights, shot on 85mm f2, high-end salon campaign photography, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 120 --no cropped hair, cut off hair, text, watermark
+raw editorial fashion magazine cover portrait of a dark-skinned Black woman with a long curly lace frontal install, big lived-in curls with naturally varied definition, individual strands and baby hairs visible, some curls tighter than others, the entire hairstyle inside the frame from crown to ends, unguarded expression with quiet confidence, lips parted slightly, looking just off camera, head and shoulders to mid-torso, subject centered, face in the upper half of the frame, curls kept clear of the bottom-left corner, warm ivory backdrop with a rosewater gradient, hard directional window light raking across her face casting true soft shadows, real skin texture with visible pores, fine facial hair and natural oil sheen, unretouched beauty, shot on medium format film, Kodak Portra 800, visible grain, in the style of a printed magazine editorial, complete hairstyle in frame, nothing cropped at the edges --ar 4:5 --style raw --s 50 --no cropped hair, cut off hair, airbrushed skin, plastic skin, smooth skin, identical curls, symmetrical pose, text, watermark
 ```
+
+If it still reads synthetic, add `--sw 200` with an `--sref` of a real magazine
+beauty photo you like, or push the film language harder ("scanned film
+negative, halation").
+
 
 **7. Hero, small polaroid — `hero/back.jpg`**
 
@@ -104,7 +118,7 @@ rotated a few degrees. It reads at thumbnail size, so it wants one bold
 texture, not a full scene: a tight detail crop of finished hair.
 
 ```
-extreme close-up beauty photograph of perfectly defined glossy knotless braids on a dark-skinned Black woman, tight crop filling the square frame with braid texture, clean precise parts, small gold cuffs catching warm light, rich deep shine on every braid, warm ivory and blush tones in the soft-focus background, macro beauty photography, luxurious haircare campaign detail shot --ar 1:1 --style raw --s 120 --no text, watermark, face
+extreme close-up editorial photograph of knotless braids on a dark-skinned Black woman, tight crop filling the square frame with braid texture, individual strands and slight frizz visible at the parts, small gold cuffs catching warm directional light, deep natural sheen, warm ivory and blush tones in the soft-focus background, shot on medium format film with visible grain, printed magazine detail page --ar 1:1 --style raw --s 50 --no airbrushed, plastic, text, watermark, face
 ```
 
 If the braids detail feels repetitive next to the knotless card, swap the
