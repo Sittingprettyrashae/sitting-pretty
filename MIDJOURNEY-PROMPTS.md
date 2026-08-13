@@ -134,14 +134,19 @@ else identical.
 
 A wide strip across the top of the "Hear about it when a seat opens up"
 popup, shown about 400 x 120 (an interim image holds the slot until yours
-lands). The popup's message is "a seat opens up", so the image IS the seat:
-her kind of chair, empty and waiting, no people. Generate at `--ar 21:9` and
-keep the chair in the vertical middle of the frame: the slot crops some off
-the top and bottom.
+lands). Three models, three different styles, on a plain photo backdrop:
+NO salon interior, no chair, no room. She works from home and the popup
+must not sell a studio she does not have; a seamless backdrop claims
+nothing about the place. Generate at `--ar 21:9` and keep the three faces
+in the vertical middle of the frame: the slot crops some off the top and
+bottom.
 
 ```
-editorial interior photograph of a single elegant salon styling chair in a bright feminine beauty studio, empty chair waiting for its next client, warm ivory walls with soft rosewater pink tones, a large round mirror with warm glowing light, gold accents, fresh flowers on the styling station, soft diffused window light with champagne highlights, glossy high-end salon campaign photography, wide cinematic composition with the chair centered in the vertical middle of the frame, shallow depth of field --ar 21:9 --style raw --s 120 --no people, faces, text, watermark, clutter
+editorial beauty campaign photograph of three Black women standing side by side, one with deep espresso skin and long medium knotless braids with gold cuffs, one with golden caramel skin and a big voluminous curly lace frontal install, one with rich mahogany-brown skin and a sleek chin-length glossy bob, each posing like a hair model with a hand in her hair, warm ivory seamless studio backdrop with subtle rosewater pink tones, soft diffused beauty-dish lighting with champagne highlights, glossy high-end salon campaign photography, wide cinematic group composition, all three faces in the vertical middle of the frame, complete hairstyles visible, nothing cropped at the edges --ar 21:9 --style raw --s 120 --no salon interior, chairs, furniture, extreme close-up, cropped hair, deformed hands, extra fingers, text, watermark
 ```
+
+Group shots multiply the failure points (six hands, three faces), so
+re-roll freely and check hands and faces at full size before shipping.
 
 ## Check them before you push
 
