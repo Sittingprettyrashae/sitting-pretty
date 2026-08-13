@@ -142,15 +142,18 @@ in the vertical middle of the frame: the slot crops some off the top and
 bottom.
 
 ```
-editorial beauty campaign photograph of three Black women with three clearly different complexions standing side by side with space between them, the first with very deep dark espresso skin wearing a soft rose-pink top, long medium knotless braids with gold cuffs, the second with medium warm brown skin wearing a deep plum sweater, a big voluminous curly lace frontal install, the third with light golden honey skin wearing a black turtleneck, a sleek chin-length glossy bob, their skin tones visibly distinct from one another, each posing like a hair model with a hand in her hair, waist-up group shot photographed from a distance with the camera pulled back, complete hairstyles visible from crown to ends with clear space above their heads, warm ivory seamless studio backdrop with subtle rosewater tones, their clothing standing out clearly against the backdrop, soft diffused beauty-dish lighting with champagne highlights, glossy high-end salon campaign photography, wide cinematic group composition, faces in the vertical middle of the frame --ar 21:9 --style raw --s 120 --no salon interior, chairs, furniture, extreme close-up, tight crop on faces, faces filling the frame, cropped hair, monochrome outfits, brown clothing, beige clothing, deformed hands, extra fingers, text, watermark
+editorial beauty campaign photograph of three friends side by side against a warm ivory seamless backdrop, a trio of Black women with complexions ranging from deep ebony to warm brown to light honey, the first wearing a soft rose-pink top with long knotless braids and small gold cuffs, the second in a deep plum sweater with a big voluminous curly lace frontal install, the third in a black turtleneck with a sleek glossy chin-length bob, each with a hand raised in her hair like a hair campaign, photographed from the waist up with the camera pulled back, complete hairstyles in frame with clear space above their heads, their colorful clothing standing out against the pale backdrop, soft diffused beauty lighting with champagne highlights, glossy high-end salon campaign photography, wide cinematic group composition --ar 21:9 --style raw --s 120 --no close-up, cropped hair, beige clothing, extra fingers, text, watermark
 ```
 
 Group shots multiply the failure points (six hands, three faces), and
 Midjourney loves to (a) zoom into faces, (b) render everyone the same
 mid-brown, and (c) dress the group in backdrop colors so the whole image
-mushes together. The wardrobe colors (rose pink, plum, black), the named
-distinct complexions, and the waist-up distance framing all exist to fight
-exactly that. Re-roll freely and check shades, hands, and crop at full size.
+mushes together. The wardrobe colors (rose pink, plum, black), the
+complexion range stated once, and the waist-up framing all fight exactly
+that. One moderation lesson learned the hard way: describing skin tones
+repeatedly and clinically trips Midjourney's moderator; say the range once
+in natural fashion-editorial language and it passes. Re-roll freely and
+check shades, hands, and crop at full size.
 
 ## Check them before you push
 
