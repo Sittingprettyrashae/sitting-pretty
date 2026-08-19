@@ -1497,6 +1497,18 @@
     document.querySelectorAll(".sig-card").forEach(card => {
       card.addEventListener("click", () => openCategory(card.getAttribute("data-cat")));
     });
+    // The swipe cue has done its job the moment she swipes; retire it.
+    const sigRow = document.querySelector(".sig-row");
+    if (sigRow) {
+      sigRow.addEventListener("scroll", function once() {
+        if (sigRow.scrollLeft < 16) return;
+        const h = document.querySelector(".sig-hint");
+        if (h) h.classList.add("gone");
+        const sc = document.querySelector(".sig-scroller");
+        if (sc) sc.classList.add("gone-fade");
+        sigRow.removeEventListener("scroll", once);
+      }, { passive: true });
+    }
     const lr = $("#leaveReview");
     if (lr) lr.addEventListener("click", openLeaveReview);
 
