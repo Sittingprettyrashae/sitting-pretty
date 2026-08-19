@@ -23,6 +23,7 @@ import {
   notifyBookingConfirmed,
   notifyBroadcast,
   notifySlotOpened,
+  notifyDirect,
 } from "../_shared/notify.ts";
 
 export async function handleAdmin(req: Request, path: string): Promise<Response> {
@@ -89,6 +90,9 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   }
   if (req.method === "POST" && path === "/admin/broadcast") {
     return await broadcast(req);
+  }
+  if (req.method === "POST" && path === "/admin/message") {
+    return await directMessage(req);
   }
   if (req.method === "GET" && path === "/admin/broadcasts") {
     return await listBroadcasts();
@@ -690,14 +694,53 @@ async function setReviewStatus(req: Request, reviewId: string): Promise<Response
 // a valid send: sometimes the picture IS the message. With include_leads the
 // waitlist gets it too, minus anyone who is already a client, so nobody hears
 // the same message twice.
+// POST /admin/message { client_id? | lead_id?, subject, message?, image?, html? }
+// -> { sent: 1, to }
+// One person from her book or her waitlist -- the Marketing composer's
+// "just one person" lane. The recipient is resolved by id, never by a
+// caller-typed address, so this can only ever message someone she already has.
+async function directMessage(req: Request): Promise<Response> {
+  const body = await readJson(req);
+  const subject = typeof body.subject === "string" ? body.subject.trim() : "";
+  const message = typeof body.message === "string" ? body.message.trim() : "";
+  const image = typeof body.image === "string" ? body.image.trim() : "";
+  const html = typeof body.html === "string" ? body.html.trim().slice(0, 400_000) : "";
+  if (!subject && !message && !image && !html) {
+    throw new HttpError(400, "Add a subject, a message, a flyer, or a design before you send.");
+  }
+
+  const db = adminDb();
+  let to: { id: string | null; email: string; name: string | null; phone: string | null } | null = null;
+  if (typeof body.client_id === "string" && body.client_id) {
+    const res = await db.from("clients").select("id, email, name, phone")
+      .eq("id", body.client_id).eq("is_admin", false).maybeSingle();
+    if (res.error) throw new HttpError(500, "Could not load that client");
+    if (res.data) to = res.data;
+  } else if (typeof body.lead_id === "string" && body.lead_id) {
+    const res = await db.from("leads").select("id, email, name, phone")
+      .eq("id", body.lead_id).maybeSingle();
+    if (res.error) throw new HttpError(500, "Could not load that person");
+    // Waitlist rows are not clients; client_id stays null in the log.
+    if (res.data) to = { id: null, email: res.data.email, name: res.data.name, phone: res.data.phone ?? null };
+  }
+  if (!to) throw new HttpError(404, "Pick who this goes to first.");
+
+  const imageUrl = image ? await storeFlyer(image) : null;
+  await notifyDirect(to, subject, message, imageUrl, html || null);
+  return json({ sent: 1, to: { name: to.name, email: to.email } });
+}
+
 async function broadcast(req: Request): Promise<Response> {
   const body = await readJson(req);
   const subject = typeof body.subject === "string" ? body.subject.trim() : "";
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const image = typeof body.image === "string" ? body.image.trim() : "";
+  // A full pasted HTML design. Hers to write (or paste from wherever she had
+  // it made); it goes out exactly as pasted, bounded only by size.
+  const html = typeof body.html === "string" ? body.html.trim().slice(0, 400_000) : "";
   const includeLeads = body.include_leads === true;
-  if (!subject && !message && !image) {
-    throw new HttpError(400, "Add a subject, a message, or a flyer before you send.");
+  if (!subject && !message && !image && !html) {
+    throw new HttpError(400, "Add a subject, a message, a flyer, or a design before you send.");
   }
 
   // EVERYTHING that can fail happens BEFORE anyone is messaged: the flyer
@@ -726,17 +769,20 @@ async function broadcast(req: Request): Promise<Response> {
 
   let sent = 0;
   for (const client of clients) {
-    await notifyBroadcast(client, subject, message, imageUrl);
+    await notifyBroadcast(client, subject, message, imageUrl, html || null);
     sent += 1;
   }
   for (const lead of leads) {
-    await notifyBroadcast({ id: null, ...lead }, subject, message, imageUrl);
+    await notifyBroadcast({ id: null, ...lead }, subject, message, imageUrl, html || null);
     sent += 1;
   }
 
+  // Her history must say SOMETHING for a design-only campaign, or it reads
+  // as a blank send.
+  const historyMessage = message || (html ? "(HTML design)" : "");
   const logged = await db
     .from("broadcasts")
-    .insert({ subject, message, sent_count: sent, image_url: imageUrl });
+    .insert({ subject, message: historyMessage, sent_count: sent, image_url: imageUrl });
   if (logged.error) console.error("broadcasts insert failed:", logged.error.message);
 
   return imageUrl ? json({ sent, image_url: imageUrl }) : json({ sent });

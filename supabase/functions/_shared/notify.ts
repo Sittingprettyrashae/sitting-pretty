@@ -618,7 +618,11 @@ interface Recipient {
 async function deliver(event: string, to: Recipient, msg: RenderedMessage): Promise<void> {
   const db = adminDb();
   const emailResult = await sendEmail(to.email, msg.subject, msg.emailBody, msg.emailHtml);
-  const smsResult = await sendSms(to.phone, msg.smsBody);
+  // An empty smsBody means this message has no text form at all; sending
+  // nothing and logging nothing beats a junk row per recipient.
+  const smsResult = msg.smsBody
+    ? await sendSms(to.phone, msg.smsBody)
+    : { status: "logged" as const };
   const rows = [
     {
       event,
@@ -632,7 +636,7 @@ async function deliver(event: string, to: Recipient, msg: RenderedMessage): Prom
       booking_id: to.booking_id,
       client_id: to.client_id,
     },
-    {
+    ...(msg.smsBody ? [{
       event,
       channel: "sms",
       recipient: to.phone,
@@ -643,7 +647,7 @@ async function deliver(event: string, to: Recipient, msg: RenderedMessage): Prom
       error: smsResult.error ?? null,
       booking_id: to.booking_id,
       client_id: to.client_id,
-    },
+    }] : []),
   ];
   const { error } = await db.from("notifications_log").insert(rows);
   if (error) console.error("notifications_log insert failed:", error.message);
@@ -793,11 +797,50 @@ export async function notifyBroadcast(
   subject: string,
   message: string,
   imageUrl: string | null = null,
+  html: string | null = null,
 ): Promise<void> {
+  // A pasted HTML design replaces the rendered email wholesale: it IS the
+  // marketing piece. The plain-text part still carries her words (or a plain
+  // pointer), so a mail app that refuses HTML shows something human.
+  const msg = tplBroadcast(client.name, subject, message, imageUrl);
+  if (html) {
+    msg.emailHtml = html;
+    if (!message) {
+      msg.emailBody = subject || "Open this email to see it as designed.";
+      // No words means no text worth sending: "Sitting Pretty: " with
+      // nothing after it is spam the day Twilio exists. The subject is the
+      // honest fallback.
+      msg.smsBody = subject ? `${SITE_NAME}: ${subject}` : "";
+    }
+  }
   await deliver(
     "broadcast",
     { email: client.email, phone: client.phone, client_id: client.id, booking_id: null },
-    tplBroadcast(client.name, subject, message, imageUrl),
+    msg,
+  );
+}
+
+// One person, not everyone: same rendering, same log, event "direct_message"
+// so her history can tell a campaign from a personal note.
+export async function notifyDirect(
+  to: { id: string | null; email: string; name: string | null; phone: string | null },
+  subject: string,
+  message: string,
+  imageUrl: string | null = null,
+  html: string | null = null,
+): Promise<void> {
+  const msg = tplBroadcast(to.name, subject, message, imageUrl);
+  if (html) {
+    msg.emailHtml = html;
+    if (!message) {
+      msg.emailBody = subject || "Open this email to see it as designed.";
+      msg.smsBody = subject ? `${SITE_NAME}: ${subject}` : "";
+    }
+  }
+  await deliver(
+    "direct_message",
+    { email: to.email, phone: to.phone, client_id: to.id, booking_id: null },
+    msg,
   );
 }
 

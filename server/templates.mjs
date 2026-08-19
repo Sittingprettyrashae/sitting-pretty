@@ -376,6 +376,7 @@ export function renderNotification(event, data) {
       };
     }
 
+    case 'direct_message':
     case 'broadcast': {
       // A broadcast can be words, a flyer, or both. The flyer goes above the
       // message in the email and is linked full size underneath it. A text
@@ -402,13 +403,25 @@ export function renderNotification(event, data) {
       if (words && flyer) smsBody = 'Sitting Pretty: ' + words + ' Flyer: ' + flyer;
       else if (words) smsBody = 'Sitting Pretty: ' + words;
       else smsBody = 'Sitting Pretty: here is a flyer for you: ' + flyer;
+      // A pasted HTML design replaces the rendered email wholesale
+      // (_shared/notify.ts does the same live). Without one, the templated
+      // parts -- greeting, flyer link, opt-out -- stay exactly as they were.
+      const pasted = typeof d.html === 'string' && d.html.trim() ? d.html.trim() : null;
+      const textBody = pasted
+        ? (words || d.subject || 'Open this email to see it as designed.')
+        : emailParts.join('\n\n');
+      // No words on an HTML send: the subject is the only honest text, and
+      // no subject means no text at all (notify.ts deliver skips those).
+      const smsFinal = pasted && !words
+        ? (d.subject ? 'Sitting Pretty: ' + d.subject : null)
+        : smsBody;
       return {
         email: {
           subject: d.subject || 'A note from Sitting Pretty',
-          body: emailParts.join('\n\n'),
-          ...(html ? { html } : {})
+          body: textBody,
+          ...(pasted ? { html: pasted } : (html ? { html } : {}))
         },
-        sms: { body: smsBody }
+        ...(smsFinal ? { sms: { body: smsFinal } } : {})
       };
     }
 

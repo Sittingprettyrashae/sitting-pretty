@@ -66,6 +66,8 @@
     bookings: [],
     blockedDays: [],
     slotAlertDays: {},   // day -> pending notify-me count
+    mkTo: null,          // null = everyone; {kind:'client'|'lead', id, name, email} = one person
+    mkMode: "msg",       // "msg" | "html"
     clients: [],
     filter: "all",
     view: "home",
@@ -1168,7 +1170,13 @@
       row += "</p></div>";
       row += '<p class="client-stats"><strong>' + count + (count === 1 ? " booking" : " bookings") + "</strong>";
       row += last ? "Last visit " + esc(last) : "No visits yet";
-      row += "</p></li>";
+      row += '<span class="row-acts">';
+      if (tel) {
+        row += '<a href="' + esc("sms:" + String(c.phone).replace(/[^+\d]/g, "")) + '">Text</a>';
+        row += '<a href="' + esc(tel) + '">Call</a>';
+      }
+      row += '<button type="button" data-mk-open="client" data-mk-id="' + esc(c.id) + '">Email</button>';
+      row += "</span></p></li>";
       return row;
     }).join("");
     $("clients-list").innerHTML = html;
@@ -1344,8 +1352,11 @@
       if (tel) row += (l.email ? " &middot; " : "") + '<a href="' + esc(tel) + '">' + esc(l.phone) + "</a>";
       row += "</p></div>";
       row += '<div class="client-stats"><strong>Waitlist</strong>' + (when ? "Joined " + esc(when) : "");
-      row += '<button class="btn btn-ghost btn-sm" type="button" data-lead-remove="' + esc(l.id) + '" style="display:block;margin-top:.4rem;margin-left:auto">Remove</button>';
-      row += "</div></li>";
+      row += '<span class="row-acts">';
+      if (tel) row += '<a href="' + esc("sms:" + String(l.phone).replace(/[^+\d]/g, "")) + '">Text</a>';
+      row += '<button type="button" data-mk-open="lead" data-mk-id="' + esc(l.id) + '">Email</button>';
+      row += '<button type="button" data-lead-remove="' + esc(l.id) + '">Remove</button>';
+      row += "</span></div></li>";
       return row;
     }).join("");
     $("leads-list").innerHTML = html;
@@ -1581,22 +1592,152 @@
     $("bc-send-yes").textContent = "Yes, send it";
   }
 
+  // ---------------- marketing: recipient + format ----------------
+  // One composer, two audiences. "Everyone" is the broadcast that always
+  // existed; "One person" resolves someone from her book or waitlist through
+  // the search box and routes to /admin/message instead.
+  function mkSetTo(to) {
+    state.mkTo = to;
+    $("mk-to-all").setAttribute("aria-selected", String(!to));
+    $("mk-to-one").setAttribute("aria-selected", String(!!to || !$("mk-picker").hidden));
+    var chosen = $("mk-chosen");
+    var meta = document.querySelector(".preview-card .email-meta");
+    if (meta) meta.textContent = to ? "To: " + (to.name || to.email) : "To: every client";
+    $("mk-search").hidden = !!to;
+    if (to) {
+      chosen.innerHTML = "To: " + esc(to.name || to.email) +
+        (to.kind === "lead" ? ' <span class="tag">waitlist</span>' : "") +
+        ' <button type="button" id="mk-unchoose" aria-label="Pick someone else">&times;</button>';
+      chosen.hidden = false;
+      $("mk-unchoose").addEventListener("click", function () {
+        mkSetTo(null);
+        $("mk-picker").hidden = false;
+        $("mk-to-one").setAttribute("aria-selected", "true");
+        $("mk-to-all").setAttribute("aria-selected", "false");
+        $("mk-search").focus();
+      });
+      $("mk-results").hidden = true;
+    } else {
+      chosen.hidden = true;
+      chosen.innerHTML = "";
+    }
+    // The waitlist checkbox only makes sense for a broadcast.
+    var inc = $("bc-include-leads");
+    if (inc) inc.closest("label").hidden = !!to;
+    mkPaintSend();
+  }
+
+  function mkPaintSend() {
+    var to = state.mkTo;
+    var onePicked = $("mk-to-one").getAttribute("aria-selected") === "true";
+    $("bc-send").textContent = to
+      ? "Send to " + ((to.name || to.email).split(/\s+/)[0])
+      : onePicked ? "Pick a person first" : "Send to every client";
+    $("bc-confirm-line").textContent = to
+      ? "This goes to " + (to.name || to.email) + " only."
+      : "This goes to every client.";
+  }
+
+  function mkSearchPool() {
+    var pool = [];
+    state.clients.forEach(function (c) {
+      pool.push({ kind: "client", id: c.id, name: c.name || "", email: c.email || "", phone: c.phone || "" });
+    });
+    state.leads.forEach(function (l) {
+      pool.push({ kind: "lead", id: l.id, name: l.name || "", email: l.email || "", phone: l.phone || "" });
+    });
+    return pool;
+  }
+
+  function mkRunSearch() {
+    var q = $("mk-search").value.trim().toLowerCase();
+    var box = $("mk-results");
+    if (!q) { box.hidden = true; box.innerHTML = ""; return; }
+    var hits = mkSearchPool().filter(function (p) {
+      return (p.name + " " + p.email + " " + p.phone).toLowerCase().indexOf(q) > -1;
+    }).slice(0, 8);
+    if (!hits.length) {
+      box.innerHTML = '<li><button type="button" disabled style="cursor:default">Nobody matches that. Clients show up here once they book, and the popup on your site fills the waitlist for you.</button></li>';
+      box.hidden = false;
+      return;
+    }
+    box.innerHTML = hits.map(function (p, i) {
+      return '<li><button type="button" data-mk-pick="' + i + '">' +
+        '<span class="who">' + esc(p.name || p.email) +
+        (p.kind === "lead" ? '<span class="tag">waitlist</span>' : "") + "</span>" +
+        '<span class="sub">' + esc(p.email) + (p.phone ? " &middot; " + esc(p.phone) : "") + "</span>" +
+        "</button></li>";
+    }).join("");
+    box.hidden = false;
+    box._hits = hits;
+  }
+
+  // Jump into Marketing already aimed at one person (the Email buttons on
+  // Clients & waitlist rows land here).
+  function mkOpenFor(kind, id) {
+    var src = kind === "client" ? state.clients : state.leads;
+    var hit = null;
+    for (var i = 0; i < src.length; i++) if (String(src[i].id) === String(id)) hit = src[i];
+    if (!hit) return;
+    switchView("broadcast");
+    $("mk-picker").hidden = false;
+    mkSetTo({ kind: kind, id: hit.id, name: hit.name || "", email: hit.email || "" });
+  }
+
+  function mkSetMode(mode) {
+    state.mkMode = mode;
+    $("mk-mode-msg").setAttribute("aria-selected", String(mode === "msg"));
+    $("mk-mode-html").setAttribute("aria-selected", String(mode === "html"));
+    var isHtml = mode === "html";
+    $("mk-html-block").hidden = !isHtml;
+    // In design mode the pasted HTML IS the message: hide the plain-text
+    // composer, the flyer, and the word-for-word previews that no longer
+    // describe what will send.
+    $("bc-message").closest("div").hidden = isHtml;
+    $("bc-image").closest("div").hidden = isHtml;
+    document.querySelector(".previews").hidden = isHtml;
+    $("suggest-chips").hidden = isHtml;
+    if (isHtml) mkPaintHtmlPreview();
+  }
+
+  function mkPaintHtmlPreview() {
+    var html = $("mk-html").value.trim();
+    var wrap = $("mk-preview-wrap");
+    var frame = $("mk-html-preview");
+    wrap.hidden = !html;
+    if (!html) return;
+    // srcdoc + an empty sandbox: her pasted design renders, its scripts do
+    // not run in her dashboard.
+    frame.srcdoc = html;
+    // Render at email width, scale to whatever the phone gives us.
+    var w = wrap.clientWidth || 600;
+    var scale = Math.min(1, w / 600);
+    frame.style.transform = "scale(" + scale + ")";
+    wrap.style.height = Math.round(420 * scale) + "px";
+  }
+
   function sendBroadcast() {
     var subject = $("bc-subject").value.trim();
-    var message = $("bc-message").value.trim();
-    var flyer = state.flyer;
+    var isHtml = state.mkMode === "html";
+    var message = isHtml ? "" : $("bc-message").value.trim();
+    var flyer = isHtml ? null : state.flyer;
+    var to = state.mkTo;
     var body = { subject: subject, message: message };
     if (flyer) body.image = flyer.dataUrl;
-    if ($("bc-include-leads").checked) body.include_leads = true;
+    if (isHtml) body.html = $("mk-html").value.trim();
+    if (!to && $("bc-include-leads").checked) body.include_leads = true;
+    if (to) body[to.kind === "lead" ? "lead_id" : "client_id"] = to.id;
     $("bc-send-yes").disabled = true;
     $("bc-send-no").disabled = true;
     $("bc-send-yes").textContent = "Sending";
-    apiPost("/api/admin/broadcast", body)
+    apiPost(to ? "/api/admin/message" : "/api/admin/broadcast", body)
       .then(function (res) {
         var n = res && typeof res.sent === "number" ? res.sent : 0;
-        var line = "Sent to " + n + (n === 1 ? " person." : " people.") +
-          (body.include_leads ? " Your waitlist got it too." : "") +
-          (flyer ? " Your flyer went with it." : "");
+        var line = to
+          ? "Sent to " + (to.name || to.email) + "."
+          : "Sent to " + n + (n === 1 ? " person." : " people.") +
+            (body.include_leads ? " Your waitlist got it too." : "") +
+            (flyer ? " Your flyer went with it." : "");
         $("bc-result").textContent = line;
         $("bc-result").hidden = false;
         toast(line);
@@ -1605,6 +1746,23 @@
         // send twice and blast every client the same message again.
         $("bc-subject").value = "";
         $("bc-message").value = "";
+        $("mk-html").value = "";
+        mkPaintHtmlPreview();
+        if (to) {
+          // Stay in One-person mode with nobody chosen: a repeat send is
+          // blocked until she picks again, so a follow-up meant for the same
+          // person can never quietly become a broadcast.
+          mkSetTo(null);
+          $("mk-picker").hidden = false;
+          $("mk-to-one").setAttribute("aria-selected", "true");
+          $("mk-to-all").setAttribute("aria-selected", "false");
+        } else {
+          $("mk-picker").hidden = true;
+          mkSetTo(null);
+          $("mk-to-all").setAttribute("aria-selected", "true");
+          $("mk-to-one").setAttribute("aria-selected", "false");
+        }
+        $("mk-search").value = "";
         clearFlyer();
         updatePreview();
         resetSendUI();
@@ -1950,6 +2108,50 @@
       });
     });
 
+    // ---- marketing wiring ----
+    $("mk-to-all").addEventListener("click", function () {
+      mkSetTo(null);
+      $("mk-picker").hidden = true;
+      $("mk-to-all").setAttribute("aria-selected", "true");
+      $("mk-to-one").setAttribute("aria-selected", "false");
+      mkPaintSend();
+    });
+    $("mk-to-one").addEventListener("click", function () {
+      $("mk-picker").hidden = false;
+      $("mk-to-all").setAttribute("aria-selected", "false");
+      $("mk-to-one").setAttribute("aria-selected", "true");
+      if (!state.clients.length) {
+        api("/api/admin/clients").then(function (res) {
+          state.clients = (res && res.clients) || [];
+        }).catch(function () {});
+      }
+      if (!state.leads.length) {
+        api("/api/admin/leads").then(function (res) {
+          state.leads = (res && res.leads) || [];
+        }).catch(function () {});
+      }
+      $("mk-search").hidden = false;
+      mkPaintSend();
+      $("mk-search").focus();
+    });
+    $("mk-search").addEventListener("input", mkRunSearch);
+    $("mk-results").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-mk-pick]");
+      if (!b) return;
+      var hit = $("mk-results")._hits[Number(b.getAttribute("data-mk-pick"))];
+      mkSetTo({ kind: hit.kind, id: hit.id, name: hit.name, email: hit.email });
+      $("mk-search").value = "";
+    });
+    $("mk-mode-msg").addEventListener("click", function () { mkSetMode("msg"); });
+    $("mk-mode-html").addEventListener("click", function () { mkSetMode("html"); });
+    $("mk-html").addEventListener("input", mkPaintHtmlPreview);
+    // Email buttons on the Clients & waitlist rows land here already aimed.
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-mk-open]");
+      if (b) mkOpenFor(b.getAttribute("data-mk-open"), b.getAttribute("data-mk-id"));
+    });
+    mkPaintSend();
+
     // "+ New category…" swaps in a text box; picking a real one hides it.
     $("ma-cat").addEventListener("change", function () {
       var fresh = this.value === "__new__";
@@ -2191,8 +2393,17 @@
     });
     $("bc-send").addEventListener("click", function () {
       var subject = $("bc-subject").value.trim();
-      var message = $("bc-message").value.trim();
-      if (state.flyerBusy) {
+      var isHtml = state.mkMode === "html";
+      var message = isHtml ? "" : $("bc-message").value.trim();
+      var to = state.mkTo;
+      // "One person" lit but nobody actually picked must never fall through
+      // to a broadcast: the segment is the signal she trusts on a phone.
+      if (!to && $("mk-to-one").getAttribute("aria-selected") === "true") {
+        toast("Pick who this goes to from the search first.");
+        $("mk-search").focus();
+        return;
+      }
+      if (!isHtml && state.flyerBusy) {
         toast("Your flyer is still loading. Give it a second, then send.");
         return;
       }
@@ -2201,18 +2412,35 @@
         $("bc-subject").focus();
         return;
       }
-      // A flyer on its own is a real message, so words are not required.
-      if (!message && !state.flyer) {
+      if (isHtml) {
+        var pasted = $("mk-html").value.trim();
+        if (!pasted) {
+          toast("Paste your design first, or switch back to Message.");
+          $("mk-html").focus();
+          return;
+        }
+        // The edge trims designs at 400k; refuse here instead of quietly
+        // sending a design cut off mid-tag.
+        if (pasted.length > 380000) {
+          toast("That design is too big to email. Anything under about 300 KB sends fine.");
+          return;
+        }
+      } else if (!message && !state.flyer) {
+        // A flyer on its own is a real message, so words are not required.
         toast("Write a message or add a flyer first.");
         $("bc-message").focus();
         return;
       }
-      var audience = $("bc-include-leads").checked
-        ? "every client plus your waitlist"
-        : "every client";
-      $("bc-confirm-line").textContent = state.flyer
-        ? "This goes to " + audience + ", with your flyer."
-        : "This goes to " + audience + ".";
+      var flyerLine = !isHtml && state.flyer ? ", with your flyer" : "";
+      if (to) {
+        $("bc-confirm-line").textContent =
+          "This goes to " + (to.name || to.email) + " only" + flyerLine + ".";
+      } else {
+        var audience = $("bc-include-leads").checked
+          ? "every client plus your waitlist"
+          : "every client";
+        $("bc-confirm-line").textContent = "This goes to " + audience + flyerLine + ".";
+      }
       $("bc-result").hidden = true;
       $("bc-send").hidden = true;
       $("bc-confirm").hidden = false;
@@ -2235,6 +2463,17 @@
     $("leads-list").addEventListener("click", function (e) {
       var btn = e.target.closest("[data-lead-remove]");
       if (!btn || btn.disabled) return;
+      // Removing someone is permanent and the button now sits right beside
+      // Email, so it takes two taps: the first arms it, and it disarms by
+      // itself if she does not follow through.
+      if (btn.getAttribute("data-armed") !== "1") {
+        btn.setAttribute("data-armed", "1");
+        btn.textContent = "Really remove?";
+        setTimeout(function () {
+          if (btn.isConnected) { btn.removeAttribute("data-armed"); btn.textContent = "Remove"; }
+        }, 3500);
+        return;
+      }
       removeLead(btn, btn.getAttribute("data-lead-remove"));
     });
 

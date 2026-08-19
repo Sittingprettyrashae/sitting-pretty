@@ -2331,19 +2331,49 @@ async function handleApi(req, res, url) {
     });
   }
 
+  // One person from her book or waitlist (admin.ts directMessage). The
+  // recipient resolves by id, never a typed address.
+  if (method === 'POST' && p === '/api/admin/message') {
+    requireAdmin(req);
+    const body = await readBody(req, { max: BROADCAST_BODY_MAX,
+      tooLarge: 'That is more than can be sent at once. Flyers need to be 5 MB or smaller, and a pasted design should be much lighter than that.' });
+    const subject = cleanStr(body.subject, 200);
+    const message = cleanStr(body.message, 2000);
+    const hasImage = typeof body.image === 'string' && body.image.trim() !== '';
+    const html = typeof body.html === 'string' ? body.html.trim().slice(0, 400000) : '';
+    if (!subject && !message && !hasImage && !html) {
+      throw new ApiError(400, 'Add a subject, a message, a flyer, or a design before you send this.');
+    }
+    let to = null;
+    if (body.client_id) {
+      const c = db.clients.find((x) => x.id === body.client_id && !x.is_admin);
+      if (c) to = { id: c.id, email: c.email, name: c.name, phone: c.phone };
+    } else if (body.lead_id) {
+      const l = db.leads.find((x) => x.id === body.lead_id);
+      if (l) to = { id: null, email: l.email, name: l.name, phone: l.phone };
+    }
+    if (!to) throw new ApiError(404, 'Pick who this goes to first.');
+    const imageUrl = hasImage ? saveFlyer(body.image) : null;
+    notify('direct_message', { email: to.email, phone: to.phone, name: to.name },
+      { subject, message, image_url: imageUrl ? origin + imageUrl : null, html });
+    save();
+    return sendJson(res, 200, { sent: 1, to: { name: to.name, email: to.email } });
+  }
+
   if (method === 'POST' && p === '/api/admin/broadcast') {
     requireAdmin(req);
     const body = await readBody(req, {
       max: BROADCAST_BODY_MAX,
-      tooLarge: 'That is more than can be sent at once. Flyers need to be 5 MB or smaller.'
+      tooLarge: 'That is more than can be sent at once. Flyers need to be 5 MB or smaller, and a pasted design should be much lighter than that.'
     });
     const subject = cleanStr(body.subject, 200);
     const message = cleanStr(body.message, 2000);
     const hasImage = typeof body.image === 'string' && body.image.trim() !== '';
+    const html = typeof body.html === 'string' ? body.html.trim().slice(0, 400000) : '';
     // A flyer with no words is fine: the image is the message. Nothing at all
     // is not, because there would be nothing to send.
-    if (!subject && !message && !hasImage) {
-      throw new ApiError(400, 'Add a subject, a message, or a flyer before you send this.');
+    if (!subject && !message && !hasImage && !html) {
+      throw new ApiError(400, 'Add a subject, a message, a flyer, or a design before you send this.');
     }
     // Stored and returned as a same-origin path; the email and text get the
     // full link so it still works from someone's inbox or phone.
@@ -2355,7 +2385,7 @@ async function handleApi(req, res, url) {
       if (c.is_admin) continue;
       clientEmails.add(String(c.email || '').toLowerCase());
       notify('broadcast', { email: c.email, phone: c.phone, name: c.name },
-        { subject, message, image_url: imageLink });
+        { subject, message, image_url: imageLink, html });
       sent += 1;
     }
     // The waitlist hears it too when she asks, minus anyone who has since
@@ -2364,12 +2394,13 @@ async function handleApi(req, res, url) {
       for (const l of db.leads) {
         if (clientEmails.has(String(l.email || '').toLowerCase())) continue;
         notify('broadcast', { email: l.email, phone: l.phone, name: l.name },
-          { subject, message, image_url: imageLink });
+          { subject, message, image_url: imageLink, html });
         sent += 1;
       }
     }
     db.broadcasts.push({
-      ts: new Date().toISOString(), subject, message,
+      ts: new Date().toISOString(), subject,
+      message: message || (html ? '(HTML design)' : ''),
       ...(imageUrl ? { image_url: imageUrl } : {}), sent
     });
     save();

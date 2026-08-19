@@ -489,6 +489,56 @@ button.cal-day:hover{border-color:var(--rose)}
 /* ---------- clients ---------- */
 #client-search{margin-top:.6rem}
 .clients-list{list-style:none;margin-top:.8rem;display:flex;flex-direction:column;gap:.55rem}
+/* segmented toggles (borrowed from the booking sheet's account step) */
+.seg{display:flex;gap:.25rem;background:var(--surface-2);border-radius:var(--r-pill);padding:.25rem}
+.seg button{
+  flex:1;border:none;background:none;font-family:inherit;font-size:.87rem;font-weight:700;
+  color:var(--ink-dim);padding:.5rem .9rem;border-radius:var(--r-pill);cursor:pointer;min-height:40px;
+  transition:background .18s var(--ease-out), color .18s var(--ease-out);
+}
+.seg button[aria-selected="true"]{background:var(--surface);color:var(--rose-deep);box-shadow:var(--shadow-soft)}
+/* Marketing composer */
+.mk-block{margin-bottom:1.1rem}
+.mk-seg{max-width:420px;margin:.45rem 0 1rem}
+.mk-results{
+  list-style:none;margin-top:.45rem;border:1px solid var(--line);border-radius:.9rem;
+  background:var(--surface);max-height:260px;overflow-y:auto;box-shadow:var(--shadow-soft);
+}
+.mk-results li{display:flex;align-items:center;gap:.6rem;width:100%}
+.mk-results button{
+  display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;width:100%;
+  border:none;background:none;font:inherit;text-align:left;cursor:pointer;
+  padding:.6rem .85rem;border-bottom:1px dashed var(--line);
+}
+.mk-results li:last-child button{border-bottom:none}
+.mk-results button:hover{background:var(--rose-soft)}
+.mk-results .who{font-weight:700}
+.mk-results .sub{font-size:.8rem;color:var(--ink-dim)}
+.mk-results .tag{font-size:.66rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--rose-deep);background:var(--rose-soft);border-radius:var(--r-pill);padding:.12rem .5rem;margin-left:.4rem}
+.mk-chosen{
+  display:flex;align-items:center;gap:.6rem;margin-top:.55rem;
+  background:var(--rose-soft);color:var(--rose-deep);font-weight:700;font-size:.92rem;
+  border-radius:.8rem;padding:.55rem .85rem;
+}
+.mk-chosen button{margin-left:auto;border:none;background:none;font:inherit;font-weight:900;color:var(--rose-deep);cursor:pointer;padding:.1rem .4rem;border-radius:.5rem}
+.mk-html{font-family:ui-monospace,SFMono-Regular,monospace;font-size:.82rem;line-height:1.45}
+.mk-preview-wrap{overflow:hidden;border:1px solid var(--line);border-radius:.9rem;background:#fff;margin-top:.7rem}
+/* Email designs are laid out for ~600px. On a phone, render at 600 and
+   scale down so she previews the real thing, not a crushed reflow. */
+.mk-html-preview{width:600px;height:420px;border:0;background:#fff;transform-origin:top left;display:block}
+/* per-row message actions on Clients & waitlist */
+.row-acts{display:flex;gap:.35rem;margin-top:.45rem;flex-wrap:wrap}
+.row-acts a,.row-acts button{
+  font:inherit;font-size:.78rem;font-weight:700;color:var(--rose-deep);text-decoration:none;
+  background:var(--rose-soft);border:none;border-radius:var(--r-pill);
+  padding:.55rem .85rem;min-height:38px;cursor:pointer;
+  display:inline-flex;align-items:center;
+}
+.row-acts [data-lead-remove]{background:var(--surface);border:1px solid var(--line-strong);color:var(--ink-dim)}
+.row-acts [data-lead-remove][data-armed="1"]{background:var(--danger);color:oklch(98% 0.008 30);border-color:transparent}
+/* 12: the chip's X gets a real thumb target without growing visually */
+.mk-chosen button{padding:.55rem .8rem;margin:-.45rem -.5rem -.45rem auto}
+.row-acts a:hover,.row-acts button:hover{background:var(--rose);color:oklch(98% 0.008 30)}
 .client-row{
   display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;
   background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
@@ -793,7 +843,7 @@ button.cal-day:hover{border-color:var(--rose)}
       <button class="tab" data-view="clients" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.4"/><path d="M3.5 20c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M15.8 15.2c2.5.1 4.2 1.6 4.7 4.6"/></svg><span>Clients &amp; waitlist</span></button>
       <button class="tab" data-view="menu" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg><span>Your menu</span></button>
       <button class="tab" data-view="reviews" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.2 18.9l1-5.4-4-3.8 5.4-.7Z"/></svg><span>Reviews</span><span class="badge reviews-badge" hidden></span></button>
-      <button class="tab" data-view="broadcast" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg><span>Message everyone</span></button>
+      <button class="tab" data-view="broadcast" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg><span>Marketing</span></button>
       <button class="tab" data-view="hours" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>Hours</span></button>
       <div class="sidenav-foot">Sitting Pretty Rashae&rsquo;s</div>
     </aside>
@@ -830,7 +880,7 @@ button.cal-day:hover{border-color:var(--rose)}
             <div class="qa-grid">
               <button class="qa" type="button" id="qa-add"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg></span>Add booking</button>
               <button class="qa" type="button" data-go="calendar"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16M9 15h.5M14.5 15h.5M9 18h.5"/></svg></span>Block a day</button>
-              <button class="qa" type="button" data-go="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Message everyone</button>
+              <button class="qa" type="button" data-go="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Marketing</button>
               <button class="qa" type="button" id="qa-site"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span>See your site</button>
             </div>
           </div>
@@ -927,9 +977,33 @@ button.cal-day:hover{border-color:var(--rose)}
       <p id="reviews-empty" class="empty" hidden>No reviews yet. Clients can leave one from the Reviews section on your site once they are signed in.</p>
     </section>
 
-    <section id="view-broadcast" class="view" aria-label="Message everyone" hidden>
-      <h2 class="script-eyebrow">Message everyone</h2>
-      <p class="view-sub">One message to every client on your list, by email and text. Tap a starter below or write your own.</p>
+    <section id="view-broadcast" class="view" aria-label="Marketing" hidden>
+      <h2 class="script-eyebrow">Marketing</h2>
+      <p class="view-sub">Email your whole list, or just one person. Write it plain, attach a flyer, or paste a full HTML design.</p>
+
+      <!-- who -->
+      <div class="mk-block">
+        <span class="field-label">Who gets this</span>
+        <div class="seg mk-seg" role="tablist" aria-label="Recipients">
+          <button type="button" role="tab" id="mk-to-all" aria-selected="true">Everyone</button>
+          <button type="button" role="tab" id="mk-to-one" aria-selected="false">One person</button>
+        </div>
+        <div id="mk-picker" hidden>
+          <input id="mk-search" class="field" type="search" placeholder="Search your clients and waitlist by name, email, or phone" autocomplete="off">
+          <ul id="mk-results" class="mk-results" hidden></ul>
+          <p id="mk-chosen" class="mk-chosen" hidden></p>
+        </div>
+      </div>
+
+      <!-- what -->
+      <div class="mk-block">
+      <span class="field-label">What you&rsquo;re sending</span>
+      <div class="seg mk-seg" role="tablist" aria-label="Format">
+        <button type="button" role="tab" id="mk-mode-msg" aria-selected="true">Message</button>
+        <button type="button" role="tab" id="mk-mode-html" aria-selected="false">HTML design</button>
+      </div>
+      </div>
+
       <div id="suggest-chips" class="suggests" role="group" aria-label="Message starters"></div>
       <form id="broadcast-form">
         <div>
@@ -939,6 +1013,12 @@ button.cal-day:hover{border-color:var(--rose)}
         <div>
           <label class="field-label" for="bc-message">Message</label>
           <textarea id="bc-message" class="field" rows="6" placeholder="Write your message to every client."></textarea>
+        </div>
+        <div id="mk-html-block" hidden>
+          <label class="field-label" for="mk-html">Your HTML design</label>
+          <p class="flyer-hint">Paste the full HTML of an email design and that design becomes the email. The preview below shows it close to how it lands; mail apps can differ a little.</p>
+          <textarea id="mk-html" class="field mk-html" rows="8" spellcheck="false" placeholder="&lt;html&gt;... paste the whole design ...&lt;/html&gt;"></textarea>
+          <div class="mk-preview-wrap" id="mk-preview-wrap" hidden><iframe id="mk-html-preview" class="mk-html-preview" sandbox="" title="Design preview"></iframe></div>
         </div>
         <div>
           <label class="field-label" for="bc-image">Flyer</label>
@@ -1014,7 +1094,7 @@ button.cal-day:hover{border-color:var(--rose)}
         <button class="qa" type="button" data-view="clients"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.4"/><path d="M3.5 20c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M15.8 15.2c2.5.1 4.2 1.6 4.7 4.6"/></svg></span>Clients &amp; waitlist</button>
         <button class="qa" type="button" data-view="menu"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg></span>Your menu</button>
         <button class="qa" type="button" data-view="reviews"><span class="badge reviews-badge" hidden style="position:absolute;transform:translate(46px,-6px)"></span><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.2 18.9l1-5.4-4-3.8 5.4-.7Z"/></svg></span>Reviews</button>
-        <button class="qa" type="button" data-view="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Message everyone</button>
+        <button class="qa" type="button" data-view="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Marketing</button>
         <button class="qa" type="button" data-view="hours"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>Hours</button>
       </div>
     </div>
