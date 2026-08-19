@@ -64,7 +64,14 @@ nav{
   width:max-content;max-width:calc(100vw - 1.2rem);
   opacity:0;transform:translateY(-14px);
 }
-nav .wordmark{font-family:var(--font-script);font-size:1.3rem;color:var(--rose);margin-right:.45rem;white-space:nowrap}
+nav .wordmark{
+  display:flex;flex-direction:column;align-items:center;line-height:1;
+  font-family:var(--font-script);font-size:1.3rem;color:var(--rose);margin-right:.45rem;white-space:nowrap;
+}
+.wordmark .wm-sub{
+  font-family:var(--font-body);font-size:.42em;font-weight:900;color:var(--ink-dim);
+  letter-spacing:.42em;text-indent:.42em;margin-top:.14em;text-transform:uppercase;
+}
 nav .links{display:flex;gap:.1rem}
 nav .links a, nav .links button{
   font-family:var(--font-body);font-size:.85rem;font-weight:700;color:var(--ink-dim);
@@ -110,7 +117,16 @@ h2{
 .kicker{font-family:var(--font-script);color:var(--rose);font-size:clamp(1.25rem,2.3vw,1.6rem);display:block;margin-bottom:.7rem}
 
 /* ---------- hero ---------- */
-.hero{min-height:96svh;display:grid;align-items:center;padding-top:clamp(5.5rem, 9vh, 7.5rem);padding-bottom:3rem}
+.hero{position:relative;min-height:96svh;display:grid;align-items:center;padding-top:clamp(5.5rem, 9vh, 7.5rem);padding-bottom:3rem}
+/* The reference's blush wash: soft pink pooling top-right and under the
+   imagery, on the ivory ground. Pure background, zero layout impact. */
+.hero::before{
+  content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(52% 44% at 82% 12%, oklch(93% 0.045 5 / .8), transparent 70%),
+    radial-gradient(40% 36% at 68% 78%, oklch(94% 0.035 15 / .55), transparent 72%),
+    radial-gradient(34% 30% at 10% 88%, oklch(95% 0.03 60 / .5), transparent 75%);
+}
 .hero-grid{display:grid;grid-template-columns:1.12fr .88fr;gap:clamp(2.5rem, 6vw, 5.5rem);align-items:center}
 .hero-copy .kicker{opacity:0}
 .hero h1{
@@ -127,6 +143,10 @@ h2{
   font-style:italic;font-weight:701;color:var(--rose-deep);
   font-size:1.06em;letter-spacing:-.01em;padding-right:.06em;
 }
+/* Italic serifs overshoot their em box; the reveal's overflow:hidden was
+   shaving the descenders and the final period. Give this one line breathing
+   room and pull the rhythm back with a negative margin. */
+.hero h1 .line-accent{padding-bottom:.14em;margin-bottom:-.14em;padding-right:.1em}
 .hero-sub{color:var(--ink-dim);font-size:clamp(1rem,1.6vw,1.15rem);max-width:44ch;margin-top:1.3rem;opacity:0}
 .hero-ctas{display:flex;gap:.8rem;margin-top:1.8rem;flex-wrap:wrap;opacity:0}
 .hero-proof{
@@ -136,6 +156,27 @@ h2{
 .hero-proof strong{color:var(--ink);font-weight:700}
 .hero-proof .star{color:var(--champagne);letter-spacing:.1em}
 .hero-visual{position:relative;opacity:0}
+/* The reference's jewelry: four-point gold sparkles and two hairline rings
+   drifting behind the imagery. Decorative, aria-hidden, and the existing
+   reduced-motion block zeroes every animation below. */
+.hero-deco{position:absolute;inset:0;pointer-events:none}
+.hero-deco .spark{
+  position:absolute;color:var(--champagne);
+  animation:twinkle 3.6s ease-in-out infinite;
+}
+.hero-deco .spark:nth-child(2){animation-delay:1.2s;animation-duration:4.4s}
+.hero-deco .spark:nth-child(3){animation-delay:2.1s;animation-duration:3.1s}
+.hero-deco .spark:nth-child(4){animation-delay:.6s;animation-duration:5s}
+@keyframes twinkle{
+  0%,100%{opacity:.35;transform:scale(.8) rotate(0deg)}
+  50%{opacity:1;transform:scale(1.12) rotate(18deg)}
+}
+.hero-deco .ring{
+  position:absolute;border:1px solid oklch(85% 0.03 20 / .7);border-radius:50%;
+  animation:ringdrift 26s linear infinite;
+}
+.hero-deco .ring.r2{animation-duration:38s;animation-direction:reverse;border-color:oklch(87% 0.025 60 / .6)}
+@keyframes ringdrift{to{transform:rotate(360deg)}}
 .hero-visual .photo-main{
   width:100%;aspect-ratio:4/5;object-fit:cover;object-position:center 20%;
   border-radius:clamp(1.2rem,2.2vw,1.8rem);
@@ -147,11 +188,19 @@ h2{
   border:5px solid var(--surface);box-shadow:var(--shadow-soft);
 }
 @media (max-width:820px){
-  .hero-grid{grid-template-columns:1fr;gap:2rem}
-  .hero-visual{order:-1;width:min(52vw,240px);margin-inline:auto}
+  /* Reference order: kicker, headline, sub, THEN the imagery big, then the
+     CTAs. hero-copy dissolves (display:contents) so its children can be
+     ordered around the visual; GSAP still finds every one of them. */
+  .hero-grid{display:flex;flex-direction:column;gap:0}
+  .hero-copy{display:contents}
+  .hero-copy .kicker{order:1;text-align:center}
+  .hero h1{order:2;text-align:center}
+  .hero-sub{order:3;margin:1rem auto 0;text-align:center}
+  .hero-visual{order:4;width:min(88vw,420px);margin:1.8rem auto 0}
+  .hero-ctas{order:5;margin-top:2.4rem;justify-content:center}
+  .hero-proof{order:6;margin:1.6rem auto 0;text-align:center}
   .hero{padding-top:5.8rem}
-  .hero-sub{margin-top:1rem}
-  .hero-ctas{margin-top:1.5rem}
+  .hero-visual .photo-back{right:-3%;bottom:-6%}
 }
 
 /* ---------- marquee ---------- */
@@ -199,8 +248,12 @@ h2{
 .sig-card:hover .sig-label span::after{translate:3px 0}
 @media (max-width: 979px){
   .sig-row{
+    /* Full-bleed scroller. The old 50%-50vw math assumed the row's parent
+       was the centered .wrap; inside the sig-layout grid cell it computed a
+       huge left pad and the row started half off screen. The wrap is 92vw,
+       so the true gutter is a plain 4vw a side. */
     display:flex;overflow-x:auto;scroll-snap-type:x mandatory;
-    margin-inline:calc(50% - 50vw);padding-inline:max(1.2rem, calc(50vw - 50%));
+    margin-inline:-4vw;padding-inline:4vw;
     padding-bottom:.6rem;scrollbar-width:none;
   }
   .sig-row::-webkit-scrollbar{display:none}
@@ -385,6 +438,11 @@ a.trust-item:hover{border-color:var(--line-strong)}
 /* ---------- services ---------- */
 #services{background:var(--surface)}
 .services-layout{display:grid;grid-template-columns:.9fr 1.5fr;gap:clamp(2.5rem,5vw,5rem);align-items:start}
+/* Solid ground: this column pins while the page scrolls under it, and a
+   stale ScrollTrigger start once let it paint straight over the signature
+   cards. The refresh fixes the math; the background makes any residual
+   overlap read as a card, not interleaved text. */
+#servicesIntro{background:var(--bg)}
 .services-intro p{color:var(--ink-dim);margin-top:1.2rem;max-width:36ch}
 .services-intro .note{
   margin-top:1.6rem;padding:1.05rem 1.25rem;border:1px solid var(--line);border-radius:var(--r-card);
@@ -493,7 +551,7 @@ a.trust-item:hover{border-color:var(--line-strong)}
 /* ---------- footer ---------- */
 footer{padding:2.8rem 0 max(2rem, env(safe-area-inset-bottom));color:var(--ink-faint);font-size:.88rem}
 footer .wrap{display:flex;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;align-items:center}
-footer .wordmark{font-family:var(--font-script);font-size:1.5rem;color:var(--rose)}
+footer .wordmark{display:inline-flex;flex-direction:column;align-items:center;line-height:1;font-family:var(--font-script);font-size:1.5rem;color:var(--rose)}
 footer a:hover{color:var(--ink)}
 
 /* ---------- booking sheet ---------- */
@@ -669,7 +727,7 @@ dialog[open] .sheet{transform:translateY(0)}
 <div class="ambient"></div>
 
 <nav id="nav" aria-label="Main">
-  <a class="wordmark" href="#top">Sitting Pretty</a>
+  <a class="wordmark" href="#top">Sitting Pretty<span class="wm-sub">Rashae&rsquo;s</span></a>
   <div class="links">
     <a href="#services">Prices</a>
     <a href="#work">The Work</a>
@@ -699,7 +757,7 @@ dialog[open] .sheet{transform:translateY(0)}
         <h1 aria-label="Hair that walks in the room before you do.">
           <span class="line"><span>Hair that walks</span></span>
           <span class="line"><span>in the room</span></span>
-          <span class="line"><span class="accent">before you do.</span></span>
+          <span class="line line-accent"><span class="accent">before you do.</span></span>
         </h1>
         <p class="hero-sub">Wig installs, knotless braids, crochet, quickweaves, and sew-ins by Ke&rsquo;Ebonie Hill, plus locs, color, and full glam. Pick your day and time, pay your deposit, and your seat is saved.</p>
         <div class="hero-ctas">
@@ -711,6 +769,15 @@ dialog[open] .sheet{transform:translateY(0)}
       <!-- Hero image slots: overwrite these two files and push, no code
            change (MIDJOURNEY-PROMPTS.md has the prompts + exact shapes).
            main.jpg renders at exactly 4:5; back.jpg is a square polaroid. -->
+      <div class="hero-deco" aria-hidden="true">
+        <!-- rings sit off-center behind the photos, like the reference -->
+        <span class="ring" style="width:34vw;height:22vw;right:-6%;top:8%;rotate:-14deg"></span>
+        <span class="ring r2" style="width:26vw;height:26vw;right:18%;bottom:-10%"></span>
+        <svg class="spark" style="width:26px;right:8%;top:10%" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c.8 6.9 4.3 10.4 12 12-7.7 1.6-11.2 5.1-12 12-.8-6.9-4.3-10.4-12-12C7.7 10.4 11.2 6.9 12 0Z"/></svg>
+        <svg class="spark" style="width:16px;right:30%;top:26%" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c.8 6.9 4.3 10.4 12 12-7.7 1.6-11.2 5.1-12 12-.8-6.9-4.3-10.4-12-12C7.7 10.4 11.2 6.9 12 0Z"/></svg>
+        <svg class="spark" style="width:20px;left:36%;top:4%" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c.8 6.9 4.3 10.4 12 12-7.7 1.6-11.2 5.1-12 12-.8-6.9-4.3-10.4-12-12C7.7 10.4 11.2 6.9 12 0Z"/></svg>
+        <svg class="spark" style="width:14px;right:4%;bottom:18%" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c.8 6.9 4.3 10.4 12 12-7.7 1.6-11.2 5.1-12 12-.8-6.9-4.3-10.4-12-12C7.7 10.4 11.2 6.9 12 0Z"/></svg>
+      </div>
       <div class="hero-visual">
         <img class="photo-main" src="assets/hero/main.jpg" alt="Long curly lace frontal install" fetchpriority="high" data-video="assets/motion/hero-main.mp4" data-eager>
         <img class="photo-back" src="assets/hero/back.jpg" alt="Knotless braids swept over one shoulder" loading="lazy" data-video="assets/motion/hero-back.mp4" data-eager>
@@ -929,7 +996,7 @@ dialog[open] .sheet{transform:translateY(0)}
 
 <footer>
   <div class="wrap">
-    <span class="wordmark">Sitting Pretty</span>
+    <span class="wordmark">Sitting Pretty<span class="wm-sub">Rashae&rsquo;s</span></span>
     <span>Ke&rsquo;Ebonie Hill &middot; Cosmetologist &middot; Fort Worth, TX</span>
     <a href="tel:+18177048300">(817) 704-8300</a>
   </div>

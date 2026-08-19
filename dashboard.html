@@ -43,7 +43,8 @@ img{max-width:100%;display:block}
   background:var(--surface);
   border-bottom:1px solid var(--line);
 }
-.wordmark{font-family:var(--font-script);font-size:1.45rem;color:var(--rose);line-height:1;white-space:nowrap}
+.wordmark{display:inline-flex;flex-direction:column;align-items:center;font-family:var(--font-script);font-size:1.45rem;color:var(--rose);line-height:1;white-space:nowrap}
+.wordmark .wm-sub{font-family:var(--font-body);font-size:.4em;font-weight:900;color:var(--ink-dim);letter-spacing:.42em;text-indent:.42em;margin-top:.14em;text-transform:uppercase}
 .topbar-label{
   font-size:.72rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase;
   color:var(--ink-faint);padding:.2rem .55rem;border:1px solid var(--line);border-radius:var(--r-pill);
@@ -717,7 +718,7 @@ button.cal-day:hover{border-color:var(--rose)}
 <body>
 
 <header class="topbar">
-  <span class="wordmark">Sitting Pretty</span>
+  <span class="wordmark">Sitting Pretty<span class="wm-sub">Rashae&rsquo;s</span></span>
   <span class="topbar-label">Dashboard</span>
   <span class="spacer"></span>
   <button id="logout-btn" class="btn btn-ghost btn-sm" hidden>Log out</button>

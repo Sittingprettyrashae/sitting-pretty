@@ -1467,6 +1467,16 @@
     });
   }
 
+  // The pin under #services was measured before async content (catalog
+  // accordion, the widget, late images) changed the page's height, so its
+  // start point went stale and the pinned intro painted over the signature
+  // cards. Re-measure once everything that changes height has landed.
+  function refreshScrollMath() {
+    if (window.ScrollTrigger && typeof ScrollTrigger.refresh === "function") {
+      try { ScrollTrigger.refresh(); } catch (e) {}
+    }
+  }
+
   // ---------- boot ----------
   async function boot() {
     // Her hours first and unawaited: the table on the page and the day strip
@@ -1477,6 +1487,8 @@
     paintSignaturePrices();
     wireNav();
     initWidget();
+    refreshScrollMath();
+    window.addEventListener("load", refreshScrollMath);
     // demo ribbon
     try { await SP.request("/api/_outbox"); demoMode = true; $("#demoRibbon").style.display = "block"; } catch (e) {}
     if (offline) { const b = $("#navMyBookings"); if (b) b.style.display = "none"; }
