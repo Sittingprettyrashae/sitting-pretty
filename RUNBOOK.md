@@ -454,10 +454,21 @@ Notes:
 
 - `STRIPE_WEBHOOK_SECRET` does not exist until step 4; set the rest now and
   re-run `supabase secrets set STRIPE_WEBHOOK_SECRET=...` after step 4.
-- Resend: create an account at https://resend.com, verify the sending domain
-  (the same domain as step 7), and create an API key. Until the domain is
-  verified, `NOTIFY_FROM_EMAIL` can stay unset and the code falls back to
-  Resend's shared onboarding sender, which is fine for testing only.
+- Resend: **DONE 2026-08-19.** Her own account (sittingprettyrashae@gmail.com,
+  free tier: 3,000 emails/month, 100/day, forever), sending domain
+  `send.sittingprettyrashae.com` verified, and a **sending-only** API key
+  named "Sitting Pretty site". The four DNS records (DKIM, SPF TXT, SPF MX,
+  DMARC) were imported into her Cloudflare as a BIND file, all DNS-only.
+  Verified end to end: a real booking through the live API produced
+  `notifications_log.status = 'sent'` with provider ids, for both the client
+  confirmation and Ebony's owner alert.
+  - Sending is from a SUBdomain on purpose (`send.` + her domain): it keeps
+    her root domain's mail reputation separate, which is Resend's own advice.
+  - The from address lives in `NOTIFY_FROM_EMAIL` and the display name has an
+    apostrophe ("Rashae's"), so **that value must stay quoted in .env.local**
+    or `set -a; . ./server/.env.local` dies with `unmatched '`.
+  - The daily cap is the one to watch: a broadcast to more than 100 people in
+    one day exceeds the free plan. Split it across days, or upgrade.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically
   by the edge runtime. Do not set them and never put the service role key in
   any frontend file.
