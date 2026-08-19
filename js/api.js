@@ -240,7 +240,15 @@ window.SP = (() => {
       await bootstrapClient();
       return data;
     },
-    requestCode: (email) => sbFetch("/otp", { email, create_user: true }),
+    // Her project's free tier cannot put the code in the email, so what
+    // arrives is a sign-in LINK. redirect_to makes that link land back on the
+    // page the sign-in started from (dashboard stays dashboard, booking stays
+    // booking) instead of dumping everyone on the homepage; api.js absorbs
+    // the #access_token fragment on arrival either way.
+    requestCode: (email) =>
+      sbFetch("/otp?redirect_to=" + encodeURIComponent(
+        window.location.origin + window.location.pathname,
+      ), { email, create_user: true }),
     verify: async (email, code) => {
       const data = await sbFetch("/verify", { email, token: code, type: "email" });
       requireSession(data, "That code is not right. Check it and try again.");

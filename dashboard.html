@@ -601,8 +601,8 @@ button.cal-day:hover{border-color:var(--rose)}
 
       <form id="code-form" hidden>
         <p id="code-sent-line" class="login-note"></p>
-        <label class="field-label" for="login-code">6-digit code</label>
-        <input id="login-code" class="field field-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" placeholder="000000">
+        <label class="field-label" for="login-code">Sign-in code</label>
+        <input id="login-code" class="field field-code" inputmode="numeric" pattern="[0-9]{6,8}" maxlength="8" required autocomplete="one-time-code" placeholder="000000">
         <button id="code-submit" class="btn btn-solid btn-wide" type="submit">Sign in</button>
         <button id="change-email-btn" class="btn btn-ghost btn-wide" type="button">Back to password sign in</button>
       </form>

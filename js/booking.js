@@ -736,7 +736,9 @@
       S.codePurpose = forgot ? "reset" : "login";
       S.codeNote = forgot
         ? "No problem. We will email you a code, then you can set a new password."
-        : "We will email you a 6-digit code. No password needed.";
+        : (!!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl))
+          ? "We will email you a sign-in link. One tap and you are back here, signed in."
+          : "We will email you a 6-digit code. No password needed.";
       startCode(email, foot);
     });
 
@@ -841,9 +843,11 @@
   }
 
   function rWhoCode(body, foot) {
-    body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || "We will email you a 6-digit code.")}</p>`));
+    body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || ((!!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl))
+      ? "Check your email and tap the sign-in link inside."
+      : "We will email you a 6-digit code."))}</p>`));
     body.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" name="username" autocomplete="username" value="${esc(S.email)}"></div>`));
-    body.appendChild(el(`<div class="field"><label for="bkCode">6-digit code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456"></div>`));
+    body.appendChild(el(`<div class="field"><label for="bkCode">Sign-in code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="123456"></div>`));
     const links = el(`<p class="alt-links">
       <button type="button" data-alt="resend">Send it again</button><span aria-hidden="true">·</span>
       <button type="button" data-alt="back">Use a password instead</button>
@@ -867,7 +871,7 @@
       const email = $("#bkEmail", body).value.trim().toLowerCase();
       const code = codeInput.value.trim();
       if (!SP.emailLooksOk(email)) return msg(foot, "That email does not look right. Check it and try again.", true);
-      if (code.length !== 6) return msg(foot, "Enter the 6-digit code we emailed you.", true);
+      if (!/^[0-9]{6,8}$/.test(code)) return msg(foot, "Enter the code from your email, or just tap the link in it.", true);
       go.disabled = true; msg(foot, "Checking...");
       const seq = opSeq;
       try {
