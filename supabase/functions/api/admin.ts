@@ -20,6 +20,7 @@ import {
   notifyBookingCanceled,
   notifyBookingConfirmed,
   notifyBroadcast,
+  notifySlotOpened,
 } from "../_shared/notify.ts";
 
 export async function handleAdmin(req: Request, path: string): Promise<Response> {
@@ -66,6 +67,9 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   }
   if (req.method === "GET" && path === "/admin/leads") {
     return await listLeads();
+  }
+  if (req.method === "GET" && path === "/admin/slot-alerts") {
+    return await listSlotAlerts();
   }
   const leadDeleteMatch = path.match(/^\/admin\/leads\/([^/]+)$/);
   if (req.method === "DELETE" && leadDeleteMatch) {
@@ -219,7 +223,16 @@ async function setBookingStatus(req: Request, bookingId: string): Promise<Respon
     throw new HttpError(500, "Could not update the booking");
   }
 
-  if (status === "canceled") await notifyBookingCanceled(updated.data, "admin");
+  if (status === "canceled") {
+    await notifyBookingCanceled(updated.data, "admin");
+    // Whoever tapped "notify me" on this window gets their email, whichever
+    // side did the cancelling. Never allowed to break the cancel itself.
+    try {
+      await notifySlotOpened(updated.data);
+    } catch (err) {
+      console.error("slot alert sweep failed:", err);
+    }
+  }
   // Admin confirm counts as the "confirmed" event (ARCHITECTURE.md), same
   // as a paid deposit.
   if (status === "confirmed") await notifyBookingConfirmed(updated.data);
@@ -415,6 +428,25 @@ async function setServiceActive(req: Request, serviceId: string): Promise<Respon
   if (res.error) throw new HttpError(500, "Could not update that style");
   if (!res.data) throw new HttpError(404, "That style is not on the menu");
   return json({ service: res.data });
+}
+
+// GET /admin/slot-alerts -> { days: [{day, count}] }
+// Demand she cannot see anywhere else: how many people are waiting on a time
+// that is already booked. Counts only, per day, today onward -- the calendar
+// paints a badge with it so an overbooked day argues for opening more hours.
+async function listSlotAlerts(): Promise<Response> {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  const res = await adminDb()
+    .from("slot_alerts")
+    .select("day")
+    .is("notified_at", null)
+    .gte("day", today);
+  if (res.error) throw new HttpError(500, "Could not load slot alerts");
+  const byDay = new Map<string, number>();
+  for (const r of res.data ?? []) byDay.set(r.day, (byDay.get(r.day) ?? 0) + 1);
+  const days = [...byDay.entries()].map(([day, count]) => ({ day, count }))
+    .sort((a, b) => a.day < b.day ? -1 : 1);
+  return json({ days });
 }
 
 // GET /admin/leads -> { leads: [{id, name, email, phone, source, ts}] }

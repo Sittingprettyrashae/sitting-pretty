@@ -419,18 +419,52 @@
     foot.appendChild(cont);
 
     async function loadDay(iso) {
+      const stale_note = $("#allTakenNote", body); if (stale_note) stale_note.remove();
+      closeNotify();
       times.innerHTML = `<p class="time-empty">Checking Ebony's book...</p>`;
       S.time = null; cont.disabled = true;
       const seq = opSeq;
       try {
         const av = await SP.request(`/api/availability?service_id=${encodeURIComponent(s.service_id)}&date=${iso}`);
         if (stale(seq)) return;
-        if (av.closed || av.blocked || !av.slots.length) {
+        const taken = av.taken || [];
+        if (av.closed || av.blocked || (!av.slots.length && !taken.length)) {
           times.innerHTML = `<p class="time-empty">${av.closed ? "Closed this day." : av.blocked ? "Ebony is out this day." : "No openings left this day. Try another."}</p>`;
           return;
         }
         times.innerHTML = "";
-        av.slots.forEach(t => times.appendChild(el(`<button type="button" class="time-chip" data-t="${t}">${fmtTime(t)}</button>`)));
+        // Open and taken chips interleave in time order, the way the day
+        // actually looks. A taken chip is still tappable: it opens the
+        // notify strip below the grid instead of selecting a time.
+        // Arrived from a slot-alert email: settle the promise now. If the
+        // time is open, hand it to them selected; if it is gone, say so in
+        // words instead of letting a TAKEN chip imply the email was wrong.
+        const promised = S.fromAlert && iso === S.date ? S.fromAlert : null;
+        if (promised) S.fromAlert = null;
+        [...av.slots.map(t => ({ t, open: true })), ...taken.map(t => ({ t, open: false }))]
+          .sort((a, b) => a.t < b.t ? -1 : 1)
+          .forEach(({ t, open }) => times.appendChild(el(open
+            ? `<button type="button" class="time-chip" data-t="${t}">${fmtTime(t)}</button>`
+            : (S.alerted && S.alerted[iso + " " + t]
+              ? `<button type="button" class="time-chip taken onlist" data-taken="${t}" aria-label="${fmtTime(t)}, taken. You are on the list for this time.">${fmtTime(t)}<span class="tk">on list</span></button>`
+              : `<button type="button" class="time-chip taken" data-taken="${t}" aria-label="${fmtTime(t)}, taken. Get notified if it opens up.">${fmtTime(t)}<span class="tk">taken</span></button>`))));
+        if (taken.length && !av.slots.length) {
+          times.insertAdjacentHTML("beforebegin",
+            `<p class="time-empty" id="allTakenNote">Every time is booked this day. Tap one and we will email you if it frees up.</p>`);
+        }
+        if (promised) {
+          if (av.slots.includes(promised)) {
+            const chip = times.querySelector(`[data-t="${promised}"]`);
+            if (chip) {
+              chip.classList.add("sel"); S.time = promised; cont.disabled = false;
+              times.insertAdjacentHTML("beforebegin",
+                `<p class="time-empty" id="allTakenNote">${fmtTime(promised)} is yours if you want it. It is selected below.</p>`);
+            }
+          } else {
+            times.insertAdjacentHTML("beforebegin",
+              `<p class="time-empty" id="allTakenNote">${fmtTime(promised)} went to someone else. These times are still open.</p>`);
+          }
+        }
       } catch (e) { if (!stale(seq)) times.innerHTML = `<p class="time-empty">Could not load times. ${esc(e.message)}</p>`; }
     }
     strip.addEventListener("click", e => {
@@ -438,7 +472,82 @@
       strip.querySelectorAll(".sel").forEach(x => x.classList.remove("sel"));
       c.classList.add("sel"); S.date = c.getAttribute("data-date"); loadDay(S.date);
     });
+    // "Want this time if it frees up?" -- lives under the grid, one at a
+    // time, and never disturbs the selected open slot.
+    // Slots already claimed this visit: their chips read ON LIST instead of
+    // TAKEN, so someone browsing a second time can see what they hold.
+    S.alerted = S.alerted || {};
+    let notifyBox = null;
+    function closeNotify() {
+      if (notifyBox) { notifyBox.remove(); notifyBox = null; }
+      times.querySelectorAll(".taken.ntf").forEach(x => x.classList.remove("ntf"));
+    }
+    function openNotify(chip) {
+      closeNotify();
+      chip.classList.add("ntf");
+      const t = chip.getAttribute("data-taken");
+      const knownEmail = me && me.client && me.client.email;
+      notifyBox = el(`
+        <div class="notify-strip" role="group" aria-label="Get notified">
+          <p tabindex="-1"><b>${fmtTime(t)} is taken.</b> Want it if it frees up? First to book gets the spot.</p>
+          ${knownEmail ? "" : `<div class="field"><label for="ntfEmail">Email</label><input id="ntfEmail" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(S.email || "")}"></div>
+          <input type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px">`}
+          <div class="notify-actions">
+            <button type="button" class="btn btn-solid btn-sm" data-ntf-go>Email me</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-ntf-x>Never mind</button>
+          </div>
+          <p class="ntf-note" aria-live="polite"></p>
+        </div>`);
+      times.insertAdjacentElement("afterend", notifyBox);
+      // A tap on a top-row chip must visibly DO something: on a phone the
+      // strip lands below a 5-7 row grid, entirely off screen. Scroll it in
+      // and put focus on its headline (which also announces it to a screen
+      // reader). Deliberately NOT focusing the email field: a single chip tap
+      // that pops the iOS keyboard is a mistap tax.
+      try { notifyBox.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (e) {}
+      const head = notifyBox.querySelector("p[tabindex]");
+      if (head) head.focus({ preventScroll: true });
+      const note = $(".ntf-note", notifyBox);
+      $("[data-ntf-x]", notifyBox).addEventListener("click", closeNotify);
+      const emailField = $("#ntfEmail", notifyBox);
+      if (emailField) emailField.addEventListener("input", () => { S.email = emailField.value.trim(); });
+      $("[data-ntf-go]", notifyBox).addEventListener("click", async () => {
+        const go = $("[data-ntf-go]", notifyBox);
+        const emailInput = $("#ntfEmail", notifyBox);
+        const hp = notifyBox.querySelector('[name="company"]');
+        const email = knownEmail || (emailInput ? emailInput.value.trim().toLowerCase() : "");
+        if (!knownEmail && !SP.emailLooksOk(email)) {
+          note.textContent = "That email does not look right. Check it and try again.";
+          return;
+        }
+        if (!knownEmail) S.email = email;
+        go.disabled = true;
+        note.textContent = "Saving...";
+        try {
+          await SP.request("/api/slot-alerts", { method: "POST", body: {
+            day: S.date, time: t, duration_min: s.duration_min || undefined,
+            ...(knownEmail ? {} : { email }),
+            ...(hp && hp.value ? { company: hp.value } : {}),
+          } });
+          S.alerted[S.date + " " + t] = true;
+          chip.classList.add("onlist");
+          const tk = chip.querySelector(".tk"); if (tk) tk.textContent = "on list";
+          chip.setAttribute("aria-label", fmtTime(t) + ", taken. You are on the list for this time.");
+          notifyBox.innerHTML = `<p class="ntf-done">✓ You're on the list. If ${fmtTime(t)} frees up, you'll get one email so you can grab it first.</p>
+            <div class="notify-actions"><button type="button" class="btn btn-ghost btn-sm" data-ntf-done>Done</button></div>`;
+          $("[data-ntf-done]", notifyBox).addEventListener("click", closeNotify);
+        } catch (err) {
+          note.textContent = err.message;
+          go.disabled = false;
+        }
+      });
+      // Deliberately no auto-focus on the email field: a single chip tap that
+      // pops the phone keyboard is a mistap tax. Focus sits on the headline.
+    }
+
     times.addEventListener("click", e => {
+      const taken = e.target.closest(".time-chip.taken");
+      if (taken) { openNotify(taken); return; }
       const c = e.target.closest(".time-chip"); if (!c) return;
       times.querySelectorAll(".sel").forEach(x => x.classList.remove("sel"));
       c.classList.add("sel"); S.time = c.getAttribute("data-t"); cont.disabled = false;
@@ -1251,8 +1360,24 @@
       syncNav();
     }
 
-    // returning from checkout
+    // From a slot-alert email: open the sheet with the day preselected. The
+    // service comes first in the steps, so the day waits in S.date and the
+    // when-step picks it up the moment they choose a service.
     const q = new URLSearchParams(window.location.search);
+    const nd = q.get("notify_day");
+    const nt = q.get("t");
+    if (nd && /^\d{4}-\d{2}-\d{2}$/.test(nd)) {
+      history.replaceState(null, "", window.location.pathname);
+      // openBooking resets the whole sheet state, so the day goes in AFTER.
+      // The service step renders first; the when-step reads S.date when they
+      // get there and lands them on the day their email named. The time rides
+      // along so the when-step can either hand them the slot or say plainly
+      // that it went to someone else -- a grid that silently shows TAKEN
+      // again reads as "the email lied".
+      openBooking(null);
+      S.date = nd;
+      if (nt && /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(nt)) S.fromAlert = nt;
+    }
     if (q.get("paid") === "1") {
       const bookingId = q.get("booking") || "";
       history.replaceState(null, "", window.location.pathname);

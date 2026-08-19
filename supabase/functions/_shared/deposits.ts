@@ -16,7 +16,11 @@
 // PARITY: mirrors sweepExpiredDeposits in server/server.mjs.
 
 import { adminDb } from "./db.ts";
-import { notifyDepositExpired, notifyOwnerDepositExpired } from "./notify.ts";
+import {
+  notifyDepositExpired,
+  notifyOwnerDepositExpired,
+  notifySlotOpened,
+} from "./notify.ts";
 
 export const DEPOSIT_DEADLINE_MS = 24 * 60 * 60 * 1000;
 
@@ -45,5 +49,11 @@ export async function sweepExpiredDeposits(): Promise<void> {
   for (const booking of res.data ?? []) {
     await notifyDepositExpired(booking);
     await notifyOwnerDepositExpired(booking);
+    // The lapsed deposit just reopened the window; tell whoever asked.
+    try {
+      await notifySlotOpened(booking);
+    } catch (err) {
+      console.error("slot alert sweep failed:", err);
+    }
   }
 }

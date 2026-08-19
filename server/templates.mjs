@@ -258,6 +258,30 @@ export function renderNotification(event, data) {
         }
       };
 
+    // A slot someone tapped "notify me" on just freed up. One fact, one
+    // link, and an honest warning that nothing is being held. Mirrors
+    // _shared/notify.ts tplSlotOpened; the demo links its own origin.
+    case 'slot_opened': {
+      const slot = niceDate(d.day) + ' at ' + niceTime(d.time);
+      // The caller passes an absolute url; a bare path in an email body is
+      // not a link anywhere. "may be open": overlap-based, see notify.ts.
+      const url = d.url || ('/?notify_day=' + d.day);
+      return {
+        email: {
+          subject: 'A spot just opened at Sitting Pretty: ' + slot,
+          body:
+            'Good news: an appointment just came off the books, and ' + slot + ' may be open now.\n\n' +
+            'Book it here before someone else does (first come, first served):\n' + url + '\n\n' +
+            'Questions? Text Ebony at ' + PHONE + '.\n\n' +
+            'Sitting Pretty\n' +
+            "Didn't ask for this, or want off the list? Just reply and say so."
+        },
+        sms: {
+          body: 'Sitting Pretty: the ' + slot + ' time you asked about may be open now. First come, first served: ' + url
+        }
+      };
+    }
+
     /* ---- what Ebony gets. Never sent to a client. Always names who and
        gives their number so she can act straight from the message. ---- */
 

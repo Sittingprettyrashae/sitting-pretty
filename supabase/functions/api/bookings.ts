@@ -30,6 +30,11 @@ interface Availability {
   closed: boolean;
   blocked: boolean;
   slots: string[];
+  // Slot starts a client could have had if someone else did not hold them.
+  // The booking sheet renders these as tappable "notify me" chips. Nothing
+  // private leaks: the same information is already visible as the gaps
+  // between open slots.
+  taken: string[];
 }
 
 async function availabilityFor(serviceId: string, date: string): Promise<Availability> {
@@ -41,13 +46,13 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
   const weekday = new Date(date + "T00:00:00Z").getUTCDay();
   const hours = await readDayHours(weekday);
   if (hours.closed || !hours.open || !hours.close) {
-    return { date, closed: true, blocked: false, slots: [] };
+    return { date, closed: true, blocked: false, slots: [], taken: [] };
   }
 
   const db = adminDb();
   const blockedRes = await db.from("blocked_days").select("date").eq("date", date).maybeSingle();
   if (blockedRes.error) throw new HttpError(500, "Could not check availability");
-  if (blockedRes.data) return { date, closed: false, blocked: true, slots: [] };
+  if (blockedRes.data) return { date, closed: false, blocked: true, slots: [], taken: [] };
 
   const bookedRes = await db
     .from("bookings")
@@ -75,18 +80,20 @@ async function availabilityFor(serviceId: string, date: string): Promise<Availab
   });
 
   const now = chicagoNow();
-  if (date < now.date) return { date, closed: false, blocked: false, slots: [] };
+  if (date < now.date) return { date, closed: false, blocked: false, slots: [], taken: [] };
 
   const open = hhmmToMin(hours.open);
   const close = hhmmToMin(hours.close);
   const slots: string[] = [];
+  const taken: string[] = [];
   for (let start = open; start + service.duration_min <= close; start += SLOT_STEP_MIN) {
     if (date === now.date && start <= now.minutes) continue;
     const end = start + service.duration_min;
     const overlaps = booked.some((b) => start < b.end && b.start < end);
     if (!overlaps) slots.push(minToHhmm(start));
+    else taken.push(minToHhmm(start));
   }
-  return { date, closed: false, blocked: false, slots };
+  return { date, closed: false, blocked: false, slots, taken };
 }
 
 export async function handleServices(): Promise<Response> {

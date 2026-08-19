@@ -505,6 +505,39 @@ function tplBroadcast(
   };
 }
 
+// A slot someone was waiting on just freed up. Short on purpose: the whole
+// message is one fact and one link, and the link carries the day so the
+// booking sheet lands them on it. Nothing is held for anyone -- the copy says
+// so, so the second person to open the email is warned, not misled.
+function tplSlotOpened(day: string, time: string): RenderedMessage {
+  const slot = `${fmtDate(day)} at ${fmtTime(time)}`;
+  // The time rides in the link so the when-step can settle the promise:
+  // hand them the slot if it is open, or say in words that it went.
+  const url = `https://sittingprettyrashae.com/?notify_day=${day}&t=${encodeURIComponent(time)}`;
+  // "may be open now", not "is open": the sweep fires on window overlap, so a
+  // nearby cancellation can free part of a window while the exact start is
+  // still blocked by another appointment. Say what we know, no more.
+  return {
+    subject: `A spot just opened at ${SITE_NAME}: ${slot}`,
+    emailBody: [
+      `Good news: an appointment just came off the books, and ${slot} may be open now.`,
+      ``,
+      `Book it here before someone else does (first come, first served):`,
+      url,
+      ``,
+      PHONE_LINE,
+      ``,
+      SITE_NAME,
+      // Guests are never verified, so the wrong inbox must have a way out
+      // that a person can actually use. Replies land with Ebony (reply_to).
+      `Didn't ask for this, or want off the list? Just reply and say so.`,
+    ].join("\n"),
+    smsBody:
+      `${SITE_NAME}: the ${slot} time you asked about may be open now. ` +
+      `First come, first served: ${url}`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Delivery + logging
 // ---------------------------------------------------------------------------
@@ -766,4 +799,84 @@ export async function notifyBroadcast(
     { email: client.email, phone: client.phone, client_id: client.id, booking_id: null },
     tplBroadcast(client.name, subject, message, imageUrl),
   );
+}
+
+// Called from cancel.ts after a booking is canceled. Finds everyone waiting
+// inside the freed window, sends each their one email, and marks the alert
+// spent BEFORE sending: a crash between the two means a missed email, which a
+// client forgives, never a double send, which reads like spam. Alerts are
+// per-address; the same cancellation never emails one address twice even if
+// they tapped two chips inside the window.
+export async function notifySlotOpened(b: BookingLike): Promise<void> {
+  const db = adminDb();
+  const startMin = Number(b.time.slice(0, 2)) * 60 + Number(b.time.slice(3, 5));
+  const endMin = startMin + ((b as { duration_min?: number }).duration_min ?? 60);
+
+  // Every pending alert for the day, filtered by WINDOW OVERLAP in code: a
+  // chip before the canceled start is often taken only because the service
+  // the client wanted would have run into this appointment, so containment
+  // ([start, end)) would silently skip exactly the people most likely to
+  // book. Day volumes are tiny; reading the day costs nothing.
+  const res = await db
+    .from("slot_alerts")
+    .select("id, day, time, duration_min, email, client_id")
+    .eq("day", b.date)
+    .is("notified_at", null);
+  if (res.error) {
+    console.error("slot_alerts read failed:", res.error.message);
+    return;
+  }
+  const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+  let rows = (res.data ?? []).filter((a) => {
+    const t = toMin(a.time);
+    return t < endMin && t + (a.duration_min ?? 60) > startMin;
+  });
+  if (!rows.length) return;
+
+  // Overlap says "worth checking", not "free": the wanted window can still be
+  // blocked by ANOTHER appointment or a live checkout hold. Sending anyway
+  // would burn a one-shot alert on a false alarm, so verify each candidate
+  // against what actually remains on the day before claiming it.
+  const [activeRes, holdsRes] = await Promise.all([
+    db.from("bookings").select("time, duration_min").eq("date", b.date).neq("status", "canceled"),
+    db.from("holds").select("time, duration_min").eq("date", b.date)
+      .gt("expires_at", new Date().toISOString()),
+  ]);
+  if (activeRes.error || holdsRes.error) {
+    console.error("slot_alerts verify failed:",
+      activeRes.error?.message ?? holdsRes.error?.message);
+    return;
+  }
+  const busy = [...(activeRes.data ?? []), ...(holdsRes.data ?? [])].map((x) => {
+    const st = toMin(x.time as string);
+    return { start: st, end: st + ((x.duration_min as number) ?? 60) };
+  });
+  rows = rows.filter((a) => {
+    const t = toMin(a.time);
+    const end = t + (a.duration_min ?? 60);
+    return !busy.some((w) => t < w.end && w.start < end);
+  });
+  if (!rows.length) return;
+
+  const seen = new Set<string>();
+  for (const a of rows) {
+    const upd = await db
+      .from("slot_alerts")
+      .update({ notified_at: new Date().toISOString() })
+      .eq("id", a.id)
+      .is("notified_at", null)
+      .select("id")
+      .maybeSingle();
+    // Someone else (a concurrent cancel) claimed it, or the write failed:
+    // either way this alert is not ours to send.
+    if (upd.error || !upd.data) continue;
+    if (seen.has(a.email)) continue;
+    seen.add(a.email);
+    await deliver("slot_opened", {
+      email: a.email,
+      phone: null,
+      client_id: a.client_id,
+      booking_id: null,
+    }, tplSlotOpened(a.day, a.time));
+  }
 }

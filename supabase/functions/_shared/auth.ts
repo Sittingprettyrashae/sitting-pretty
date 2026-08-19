@@ -121,6 +121,21 @@ export async function requireClient(req: Request): Promise<ClientRow> {
   return reconcileAdmin(created);
 }
 
+// For endpoints a guest may also use (slot alerts): a valid session resolves
+// to its client, anything else -- no header, expired token -- is simply null,
+// never a 401. The anon key doubles as the floor Authorization header on
+// every request (js/api.js), and getUser() rejects it like any non-session
+// token, so an anonymous visitor lands on the null path, not an error.
+export async function requireClientMaybe(req: Request): Promise<ClientRow | null> {
+  const header = req.headers.get("Authorization") ?? "";
+  if (!header.trim()) return null;
+  try {
+    return await requireClient(req);
+  } catch (_e) {
+    return null;
+  }
+}
+
 export async function requireAdmin(req: Request): Promise<ClientRow> {
   const client = await requireClient(req);
   if (!client.is_admin) throw new HttpError(403, "Admin only");

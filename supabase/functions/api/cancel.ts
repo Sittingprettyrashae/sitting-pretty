@@ -8,7 +8,11 @@ import { requireClient } from "../_shared/auth.ts";
 import { adminDb } from "../_shared/db.ts";
 import { HttpError, json } from "../_shared/http.ts";
 import { withMoney } from "../_shared/money.ts";
-import { notifyBookingCanceled, notifyOwnerClientCanceled } from "../_shared/notify.ts";
+import {
+  notifyBookingCanceled,
+  notifyOwnerClientCanceled,
+  notifySlotOpened,
+} from "../_shared/notify.ts";
 
 export async function handleCancel(req: Request, bookingId: string): Promise<Response> {
   const client = await requireClient(req);
@@ -35,5 +39,13 @@ export async function handleCancel(req: Request, bookingId: string): Promise<Res
 
   await notifyBookingCanceled(updated.data, canceledBy);
   if (canceledBy === "client") await notifyOwnerClientCanceled(updated.data);
+  // The freed window may be exactly what someone tapped "notify me" on. This
+  // must never break the cancel itself: the booking is already canceled above,
+  // and a client staring at an error for a cancel that worked would try again.
+  try {
+    await notifySlotOpened(updated.data);
+  } catch (err) {
+    console.error("slot alert sweep failed:", err);
+  }
   return json({ booking: withMoney(updated.data) });
 }

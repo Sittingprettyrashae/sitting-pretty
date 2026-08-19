@@ -934,3 +934,39 @@ alter table public.reviews enable row level security;
 -- exactly the public columns. Writes go through POST /api/reviews so the
 -- name snapshot and the pending status can never be forged from a browser.
 drop policy if exists reviews_public_read_approved on public.reviews;
+
+-- ---------------------------------------------------------------------------
+-- slot_alerts: "want this time if it frees up." A client taps a taken slot in
+-- the booking sheet and leaves an email; when a cancellation frees that time,
+-- everyone waiting inside the freed window gets one email with a book link.
+-- First to book wins -- no holds, no reservations. One alert sends once
+-- (notified_at); a fresh tap on the same chip re-arms the same row.
+-- ---------------------------------------------------------------------------
+create table if not exists public.slot_alerts (
+  id uuid primary key default gen_random_uuid(),
+  day date not null,
+  time text not null check (time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+  -- How long the service they were browsing runs. What makes the sweep
+  -- honest: a 09:30 chip is often taken only because a LATER appointment
+  -- overlaps where this service would run, so the sweep must test window
+  -- overlap, not containment, or the pre-window waiters never hear back.
+  duration_min integer not null default 60 check (duration_min > 0 and duration_min <= 480),
+  email text not null,
+  client_id uuid references public.clients (id) on delete cascade,
+  notified_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- Same person, same slot, tapped twice = one alert. Email is lowercased by
+-- the handler before every insert (see leads_email_key for why the index
+-- must be plain columns, not lower(email): ON CONFLICT needs to arbitrate).
+create unique index if not exists slot_alerts_day_time_email_key
+  on public.slot_alerts (day, time, email);
+
+-- The cancel handler asks "who is waiting inside this window, unnotified?"
+create index if not exists slot_alerts_pending_idx
+  on public.slot_alerts (day) where notified_at is null;
+
+alter table public.slot_alerts enable row level security;
+-- No policies at all: only the service role reads or writes alerts, exactly
+-- like leads. A public SELECT would leak who is waiting on which day.

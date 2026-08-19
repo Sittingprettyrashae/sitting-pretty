@@ -474,6 +474,24 @@ dialog[open] .sheet{transform:translateY(0)}
   transition:border-color .16s var(--ease-out), background .16s var(--ease-out);min-height:44px;
 }
 .time-chip.sel{border-color:var(--rose);background:var(--rose-soft);color:var(--rose-deep)}
+/* A taken time is still worth tapping: it opens the notify strip. Muted so it
+   never reads as bookable, but a real button, not a dead cell. */
+.time-chip.taken{
+  color:var(--ink-faint);background:var(--surface-2);border-style:dashed;font-weight:600;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.05rem;
+}
+.time-chip.taken .tk{font-size:.6rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.75}
+.time-chip.taken.ntf{border-color:var(--rose);color:var(--rose-deep)}
+.notify-strip{
+  margin-top:.8rem;padding:.9rem 1rem;border:1px solid var(--line);border-radius:.9rem;
+  background:var(--surface-2);font-size:.92rem;
+}
+.notify-strip p{margin:0 0 .6rem;line-height:1.45}
+.notify-strip .field{margin-bottom:.7rem}
+.notify-actions{display:flex;gap:.5rem;align-items:center}
+.btn-sm{padding:.5rem .95rem;font-size:.85rem;min-height:38px}
+.ntf-note{color:var(--rose-deep);font-size:.85rem;min-height:1em;margin:.5rem 0 0}
+.ntf-done{color:var(--ink);font-weight:600;margin:0}
 .time-empty{color:var(--ink-faint);font-size:.92rem;padding:.6rem 0}
 .field{margin-bottom:.9rem}
 .field label{display:block;font-size:.82rem;font-weight:700;color:var(--ink-dim);margin-bottom:.3rem}

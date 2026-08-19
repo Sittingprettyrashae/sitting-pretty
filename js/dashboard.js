@@ -62,6 +62,7 @@
     client: null,
     bookings: [],
     blockedDays: [],
+    slotAlertDays: {},   // day -> pending notify-me count
     clients: [],
     filter: "all",
     view: "bookings",
@@ -310,6 +311,16 @@
 
     api("/api/admin/blocked-days").then(function (res) {
       state.blockedDays = (res && res.days) || [];
+      if (state.view === "calendar") { renderCalendar(); renderDayPanel(); }
+    }).catch(function () { /* calendar still works without it */ });
+
+    // How many people tapped "notify me" on a taken time, per day. Painted
+    // as a small badge on the calendar: a day people are waiting on is a day
+    // that argues for opening more hours.
+    api("/api/admin/slot-alerts").then(function (res) {
+      var map = {};
+      ((res && res.days) || []).forEach(function (d) { map[d.day] = d.count; });
+      state.slotAlertDays = map;
       if (state.view === "calendar") { renderCalendar(); renderDayPanel(); }
     }).catch(function () { /* calendar still works without it */ });
 
@@ -577,8 +588,10 @@
       if (closedWithWork) cls += " cal-closed-kept";
       if (dateStr === t) cls += " cal-today";
       if (dateStr === state.selectedDay) cls += " cal-selected";
+      var waiting = state.slotAlertDays[dateStr] || 0;
       var label = fmtDateLong(dateStr) + ", " +
         (n === 0 ? "no bookings" : n + (n === 1 ? " booking" : " bookings")) +
+        (waiting ? ", " + waiting + " waiting for an opening" : "") +
         (closedWithWork ? ", day closed but still booked" : "") +
         (isBlocked ? ", blocked" : "");
       var dots = "";
@@ -591,7 +604,8 @@
       } else {
         dots = '<span class="cal-dots" aria-hidden="true"></span>';
       }
-      html += '<button type="button" class="' + cls + '" data-date="' + dateStr + '" aria-label="' + esc(label) + '"><span class="cal-num" aria-hidden="true">' + day + "</span>" + dots + "</button>";
+      var wait = waiting ? '<span class="cal-wait" aria-hidden="true">' + waiting + " waiting</span>" : "";
+      html += '<button type="button" class="' + cls + '" data-date="' + dateStr + '" aria-label="' + esc(label) + '"><span class="cal-num" aria-hidden="true">' + day + "</span>" + dots + wait + "</button>";
     }
     $("cal-grid").innerHTML = html;
   }

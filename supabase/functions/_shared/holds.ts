@@ -14,6 +14,7 @@
 // server/server.mjs. If you change a rule here, change it there too.
 
 import { adminDb } from "./db.ts";
+import { notifySlotOpened } from "./notify.ts";
 
 // How long a slot stays reserved while she pays. 15 minutes is the number in
 // API.md and the number the booking page tells her. HOLD_MINUTES can override
@@ -64,8 +65,28 @@ export async function sweepExpiredHolds(): Promise<void> {
   const res = await adminDb()
     .from("holds")
     .delete()
-    .lte("expires_at", new Date().toISOString());
-  if (res.error) console.error("Could not clear expired holds:", res.error.message);
+    .lte("expires_at", new Date().toISOString())
+    .select("date, time, duration_min");
+  if (res.error) {
+    console.error("Could not clear expired holds:", res.error.message);
+    return;
+  }
+  // An abandoned checkout frees the window as surely as a cancellation, and
+  // a taken chip can be taken ONLY because of a hold -- someone waiting on it
+  // must hear when it lapses. notifySlotOpened verifies the slot is really
+  // free before sending, so a hold that expires and is instantly re-taken
+  // sends nothing. Never allowed to break the sweep.
+  for (const h of res.data ?? []) {
+    try {
+      await notifySlotOpened({
+        date: h.date,
+        time: h.time,
+        duration_min: h.duration_min,
+      } as unknown as Parameters<typeof notifySlotOpened>[0]);
+    } catch (err) {
+      console.error("slot alert sweep failed:", err);
+    }
+  }
 }
 
 /**

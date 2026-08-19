@@ -378,7 +378,7 @@ function defaultDb() {
   return {
     clients: [], bookings: [], sessions: {}, codes: {}, oauth_states: {},
     checkout_sessions: {}, blocked_days: [], outbox: [], broadcasts: [], holds: [],
-    leads: [], reviews: [], services: seedServiceRows(),
+    leads: [], reviews: [], slot_alerts: [], services: seedServiceRows(),
     hours: defaultHours(), seq: {}
   };
 }
@@ -395,6 +395,7 @@ function normalizeDb() {
   if (!Array.isArray(db.holds)) db.holds = [];
   if (!Array.isArray(db.blocked_days)) db.blocked_days = [];
   if (!Array.isArray(db.leads)) db.leads = [];
+  if (!Array.isArray(db.slot_alerts)) db.slot_alerts = [];
   // A db.json from before the menu was editable gets the seeded menu.
   if (!Array.isArray(db.services) || !db.services.length) db.services = seedServiceRows();
   if (!Array.isArray(db.reviews)) db.reviews = [];
@@ -900,7 +901,7 @@ function upsertGoogleClient(email, name) {
 /* ---------------- availability ---------------------------------------------- */
 
 function availability(svc, dateStr) {
-  const out = { date: dateStr, closed: false, blocked: false, slots: [] };
+  const out = { date: dateStr, closed: false, blocked: false, slots: [], taken: [] };
   const hours = businessHours(dateStr);
   if (!hours) { out.closed = true; return out; }
   if (db.blocked_days.some((b) => b.date === dateStr)) { out.blocked = true; return out; }
@@ -925,6 +926,7 @@ function availability(svc, dateStr) {
       return t < bs + bd && t + dur > bs; // one client at a time
     });
     if (!clash) out.slots.push(toHHMM(t));
+    else out.taken.push(toHHMM(t)); // notify-me chips (community: slot alerts)
   }
   return out;
 }
@@ -932,6 +934,41 @@ function availability(svc, dateStr) {
 // Everything Ebony needs to know, sent to her rather than waiting for her to
 // open the dashboard. Her phone number is the studio line, so SMS goes there
 // once a number is configured; email always works.
+// The freed window may be exactly what someone tapped "notify me" on. One
+// email per alert, marked spent first so nothing double-sends; one email per
+// address per cancellation even if they tapped two chips in the window.
+// Mirrors _shared/notify.ts notifySlotOpened.
+function notifySlotAlerts(booking) {
+  const start = toMin(booking.time);
+  const end = start + (booking.duration_min || 30);
+  // Overlap says "worth checking", not "free": the wanted window can still be
+  // blocked by another appointment or a live checkout hold. Sending anyway
+  // would burn a one-shot alert on a false alarm (_shared/notify.ts does the
+  // same verification live).
+  const now = Date.now();
+  const busy = db.bookings
+    .filter((b) => b.date === booking.date && b.status !== 'canceled')
+    .concat(db.holds.filter((h) => h.date === booking.date && Date.parse(h.expires_at) > now))
+    .map((b) => { const s = toMin(b.time); return { start: s, end: s + (b.duration_min || 30) }; });
+  const seen = new Set();
+  for (const a of db.slot_alerts) {
+    if (a.day !== booking.date || a.notified_at) continue;
+    // Window overlap, not containment: a chip before the canceled start is
+    // often taken only because the wanted service would run into it.
+    const t = toMin(a.time);
+    const aEnd = t + (a.duration_min || 60);
+    if (t >= end || aEnd <= start) continue;
+    if (busy.some((w) => t < w.end && w.start < aEnd)) continue;
+    a.notified_at = new Date().toISOString();
+    if (seen.has(a.email)) continue;
+    seen.add(a.email);
+    notify('slot_opened', { email: a.email, phone: null, name: null }, {
+      day: a.day, time: a.time,
+      url: 'http://localhost:' + PORT + '/?notify_day=' + a.day + '&t=' + encodeURIComponent(a.time),
+    });
+  }
+}
+
 function notifyOwner(event, data) {
   notify(event, { email: ADMIN_EMAILS[0], phone: OWNER_PHONE, name: 'Ke’Ebonie' }, data);
 }
@@ -976,9 +1013,14 @@ function bookingFromPaidHold(hold, sessionId) {
 function sweepExpiredHolds() {
   if (!db || !db.holds || !db.holds.length) return;
   const now = Date.now();
-  const before = db.holds.length;
+  const expired = db.holds.filter((h) => Date.parse(h.expires_at) <= now);
+  if (!expired.length) return;
   db.holds = db.holds.filter((h) => Date.parse(h.expires_at) > now);
-  if (db.holds.length !== before) save();
+  // An abandoned checkout frees the window as surely as a cancellation, and a
+  // chip can read taken purely because of a hold. notifySlotAlerts verifies
+  // the window is really free before sending (holds.ts does the same live).
+  for (const h of expired) notifySlotAlerts({ date: h.date, time: h.time, duration_min: h.duration_min });
+  save();
 }
 
 /* ---------------- payments --------------------------------------------------- */
@@ -1143,6 +1185,7 @@ function sweepExpiredDeposits() {
       { email: b.client_email, phone: b.client_phone, name: b.client_name },
       { booking: b });
     notifyOwner('owner_deposit_expired', { booking: b });
+    notifySlotAlerts(b);
     changed = true;
   }
   if (changed) save();
@@ -1335,14 +1378,19 @@ function cleanServiceFields(body) {
 
 // Per-IP throttle on the one public write, mirroring production (community.ts).
 const leadBucket = new Map();
-function throttleLead(req) {
+function throttleLead(req, bucket) {
+  // Each public write gets its OWN bucket (default: leads), because that is
+  // how production behaves: alerts.ts and community.ts keep separate maps,
+  // so six lead posts must not 429 the slot-alert endpoint here either.
+  const map = bucket || leadBucket;
   const ip = clientIp(req);
   const now = Date.now();
-  const b = leadBucket.get(ip);
-  if (!b || now > b.reset) { leadBucket.set(ip, { count: 1, reset: now + 60000 }); return; }
+  const b = map.get(ip);
+  if (!b || now > b.reset) { map.set(ip, { count: 1, reset: now + 60000 }); return; }
   b.count += 1;
   if (b.count > 6) throw new ApiError(429, 'Too many tries. Please wait a minute and try again.');
 }
+const slotAlertBucket = new Map();
 
 async function handleApi(req, res, url) {
   const p = url.pathname;
@@ -1735,6 +1783,7 @@ async function handleApi(req, res, url) {
         notify('booking_canceled_by_client', target, { booking });
         notifyOwner('booking_canceled_admin_copy', { booking, client_email: booking.client_email });
       }
+      notifySlotAlerts(booking);
       save();
     }
     return sendJson(res, 200, { booking });
@@ -1883,6 +1932,51 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
+  // "Want this time if it frees up." Same posture as /api/leads: throttled,
+  // honeypotted, and a duplicate answers exactly like a fresh row. Signed-in
+  // clients use their account email; guests type one. (alerts.ts)
+  if (method === 'POST' && p === '/api/slot-alerts') {
+    throttleLead(req, slotAlertBucket);
+    const body = await readBody(req);
+    if (body.company != null && String(body.company).trim() !== '') {
+      return sendJson(res, 200, { ok: true });
+    }
+    const day = cleanStr(body.day, 10);
+    const time = cleanStr(body.time, 5);
+    const durRaw = Number(body.duration_min);
+    const duration_min = Number.isInteger(durRaw) && durRaw >= 15 && durRaw <= 480 ? durRaw : 60;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ApiError(400, 'day must be YYYY-MM-DD');
+    if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) throw new ApiError(400, 'time must be HH:MM');
+    if (day < chicagoNow().date) throw new ApiError(400, 'That day has already passed.');
+    const client = authClient(req);
+    let email = client ? client.email : cleanStr(body.email, 254).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      throw new ApiError(400, 'That email does not look right. Check it and try again.');
+    }
+    email = email.toLowerCase();
+    // At most 5 pending alerts per address; over the cap answers like
+    // success, same no-probe posture as a duplicate (alerts.ts).
+    const pendingCount = db.slot_alerts.filter((a) => a.email === email && !a.notified_at).length;
+    if (pendingCount >= 5) return sendJson(res, 200, { ok: true });
+    // A fresh tap RE-ARMS a spent alert (alerts.ts): "you got your email,
+    // someone beat you to it, you tapped again" means you are waiting again.
+    const existing = db.slot_alerts.find((a) => a.day === day && a.time === time && a.email === email);
+    if (existing) {
+      existing.notified_at = null;
+      existing.duration_min = duration_min;
+      if (client) existing.client_id = client.id;
+      save();
+    } else {
+      db.slot_alerts.push({
+        id: nextId('sa'), day, time, duration_min, email,
+        client_id: client ? client.id : null,
+        notified_at: null, ts: new Date().toISOString(),
+      });
+      save();
+    }
+    return sendJson(res, 200, { ok: true });
+  }
+
   // Approved reviews only: what the public site prints. First name + last
   // initial, same as production: reviewers are clients, not public figures.
   if (method === 'GET' && p === '/api/reviews') {
@@ -1999,6 +2093,7 @@ async function handleApi(req, res, url) {
     if (status === 'canceled' && prev !== 'canceled') {
       booking.canceled_by = 'admin';
       notify('booking_canceled_by_admin', target, { booking });
+      notifySlotAlerts(booking);
     } else if (status === 'confirmed' && (prev === 'awaiting_deposit' || prev === 'request')) {
       notify('booking_confirmed', target, { booking });
     }
@@ -2126,6 +2221,19 @@ async function handleApi(req, res, url) {
       .map((l) => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, source: l.source, ts: l.ts }));
     return sendJson(res, 200, { leads });
   }
+  // Pending "notify me" interest, counted per day (admin.ts listSlotAlerts).
+  if (method === 'GET' && p === '/api/admin/slot-alerts') {
+    requireAdmin(req);
+    const today = chicagoNow().date;
+    const byDay = {};
+    for (const a of db.slot_alerts) {
+      if (a.notified_at || a.day < today) continue;
+      byDay[a.day] = (byDay[a.day] || 0) + 1;
+    }
+    const days = Object.keys(byDay).sort().map((day) => ({ day, count: byDay[day] }));
+    return sendJson(res, 200, { days });
+  }
+
 
   // Someone asked off the list: one tap and they are gone.
   if (method === 'DELETE' && (m = /^\/api\/admin\/leads\/([\w-]+)$/.exec(p))) {

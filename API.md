@@ -186,6 +186,34 @@ Payment effects:
 - balance paid → added to `paid_cents`, `paid_in_full` true, paid-in-full
   notification to the client and a payment notification to Ebony.
 
+
+## Slot alerts
+
+"Want this time if it frees up." A client taps a TAKEN chip in the booking
+sheet's time grid (availability now returns `taken: ["HH:MM"]` alongside
+`slots`) and leaves an email; a cancellation that frees that window emails
+everyone waiting, once each, with a `/?notify_day=YYYY-MM-DD` link. First to
+book wins -- nothing is held. Fired from every path that frees a slot: client
+cancel, admin cancel/status change, the expired-deposit sweep, and the
+expired-hold sweep -- and only after verifying the wanted window is actually
+free of remaining bookings and live holds, so nobody's one email is burned on
+a false alarm.
+
+- `POST /api/slot-alerts` `{ day, time, email?, company? }` -> `{ ok: true }`
+  Public write: same per-IP throttle, honeypot (`company`), and
+  duplicate-answers-like-fresh posture as `POST /api/leads`. Signed-in
+  clients need no email (their account email is used); guests must send one.
+  Past days 400.
+- `GET /api/admin/slot-alerts` -> `{ days: [{ day, count }] }` (admin)
+  Pending (un-notified) alert counts per day, today onward. The dashboard
+  calendar paints these as an "N waiting" badge.
+- Table `slot_alerts` is service-role only (RLS deny-all, like `leads`);
+  one row per (day, time, email), `notified_at` marks it spent -- an alert
+  sends at most once, and a fresh tap on the same chip re-arms the same row.
+  Guests are capped at 5 pending alerts per address (over-cap answers like
+  success), `duration_min` is clamped to 15-480, and the email carries a
+  reply-to-opt-out line because guest addresses are never verified.
+
 ## Leads & Reviews
 - `POST /api/leads` `{name, email, phone?, source?}` → `{ok:true}` — the site
   popup's waitlist signup. The one public write in the API: strict validation
