@@ -37,7 +37,7 @@ interface Availability {
   taken: string[];
 }
 
-async function availabilityFor(serviceId: string, date: string): Promise<Availability> {
+export async function availabilityFor(serviceId: string, date: string): Promise<Availability> {
   const service = await getService(serviceId);
   if (!service) throw new HttpError(404, "Unknown service");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "date must be YYYY-MM-DD");

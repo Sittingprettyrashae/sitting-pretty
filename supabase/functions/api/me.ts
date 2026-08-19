@@ -19,7 +19,17 @@ export async function handleMe(req: Request): Promise<Response> {
     if (res.error) throw new HttpError(500, "Could not load your bookings");
     // Every booking carries what is paid and what is left (_shared/money.ts),
     // so the dashboard never has to do money math of its own.
-    return json({ client, bookings: withMoneyAll(res.data ?? []) });
+    //
+    // notes stays behind: since Add Booking, that column can hold Ebony's
+    // OWN annotation about the client ("comp'd, always late"), and /me goes
+    // to the very person it is about. Clients never needed it back -- the
+    // note they typed at booking was addressed to her.
+    const bookings = withMoneyAll(res.data ?? []).map((b) => {
+      const pub = { ...(b as Record<string, unknown>) };
+      delete pub.notes;
+      return pub;
+    });
+    return json({ client, bookings });
   }
 
   if (req.method === "POST") {

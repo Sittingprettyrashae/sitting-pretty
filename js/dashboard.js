@@ -65,7 +65,7 @@
     slotAlertDays: {},   // day -> pending notify-me count
     clients: [],
     filter: "all",
-    view: "bookings",
+    view: "home",
     calYear: new Date().getFullYear(),
     calMonth: new Date().getMonth(),
     selectedDay: null,
@@ -264,6 +264,7 @@
   function showLogin(errText) {
     $("splash").hidden = true;
     $("app-view").hidden = true;
+    document.body.classList.remove("in-app");
     $("logout-btn").hidden = true;
     $("login-view").hidden = false;
     setLoginError(errText || "");
@@ -295,6 +296,11 @@
     $("login-view").hidden = true;
     $("app-view").hidden = false;
     $("logout-btn").hidden = false;
+    document.body.classList.add("in-app");
+    // Greet her by the name on her own account; a first name is plenty.
+    var first = (state.client && state.client.name || "").trim().split(/\s+/)[0];
+    $("hello-line").textContent = first ? "Hey, " + first + "." : "Hey, you.";
+    switchView(state.view || "home");
     loadAll();
   }
 
@@ -304,6 +310,7 @@
       state.bookings = (res && res.bookings) || [];
       renderBookings();
       updateBadge();
+      if (state.view === "home") renderHome();
       if (state.view === "calendar") { renderCalendar(); renderDayPanel(); }
     }).catch(function (err) {
       toast("Could not load bookings. " + errMsg(err));
@@ -321,6 +328,7 @@
       var map = {};
       ((res && res.days) || []).forEach(function (d) { map[d.day] = d.count; });
       state.slotAlertDays = map;
+      if (state.view === "home") renderHome();
       if (state.view === "calendar") { renderCalendar(); renderDayPanel(); }
     }).catch(function () { /* calendar still works without it */ });
 
@@ -339,6 +347,7 @@
       state.reviews = (res && res.reviews) || [];
       updateReviewsBadge();
       if (state.view === "reviews") renderReviews();
+      if (state.view === "home") renderHome();
     }).catch(function () { /* loaded again when the tab opens */ });
 
     // The calendar needs her closed days, so hours load with everything else.
@@ -355,23 +364,159 @@
   function renderAll() {
     renderBookings();
     updateBadge();
+    if (state.view === "home") renderHome();
     if (state.view === "calendar") { renderCalendar(); renderDayPanel(); }
     if (state.view === "clients") renderClients();
+  }
+
+  // ---------------- home (overview) ----------------
+  // Every number on this screen is computed from her real book, in front of
+  // her eyes -- nothing estimated, nothing invented. "Booked value" reads the
+  // price column ("$150", "$50+"): the leading number is what it counts, and
+  // a "+" price counts its floor.
+  function priceNum(p) {
+    var m = /\$?\s*(\d+(?:\.\d+)?)/.exec(String(p || ""));
+    return m ? Number(m[1]) : 0;
+  }
+  function weekDates() {
+    // Monday-start week around today, as YYYY-MM-DD strings.
+    var t = new Date(); t.setHours(12, 0, 0, 0);
+    var dow = (t.getDay() + 6) % 7; // Mon=0
+    var days = [];
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(t); d.setDate(t.getDate() - dow + i);
+      days.push(ymd(d));
+    }
+    return days;
+  }
+  function money0(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+
+  function renderHome() {
+    var t = todayStr();
+    var week = weekDates();
+    var in7 = [];
+    (function () {
+      var d = new Date(); d.setHours(12, 0, 0, 0);
+      for (var i = 0; i < 7; i++) { in7.push(ymd(d)); d.setDate(d.getDate() + 1); }
+    })();
+
+    var bs = state.bookings;
+    var todays = bs.filter(function (b) { return b.date === t && isActive(b); });
+    // "Coming up" starts TOMORROW: today's count sits in the card beside it,
+    // and one appointment showing in both reads as two.
+    var upcoming = bs.filter(function (b) { return b.date !== t && in7.indexOf(b.date) !== -1 && isActive(b); });
+    var pending = bs.filter(function (b) { return needsAttention(b); });
+    var weekBooked = 0;
+    var perDay = {};
+    week.forEach(function (d) { perDay[d] = 0; });
+    bs.forEach(function (b) {
+      if (week.indexOf(b.date) === -1) return;
+      if (b.status !== "confirmed" && b.status !== "completed") return;
+      var v = priceNum(b.price);
+      perDay[b.date] += v; weekBooked += v;
+    });
+    var newClients = 0;
+    (function () {
+      var weekSet = {};
+      week.forEach(function (d) { weekSet[d] = true; });
+      state.clients.forEach(function (c) {
+        if (c.created_at && weekSet[String(c.created_at).slice(0, 10)]) newClients++;
+      });
+    })();
+    var waiting = 0;
+    Object.keys(state.slotAlertDays || {}).forEach(function (d) { waiting += state.slotAlertDays[d]; });
+
+    var IC_CAL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>';
+    var IC_CLK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
+    var IC_DLR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 8.8c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2.2 0 2.9 6 1.6 6 4.6 0 1.4-1.3 2.2-3 2.2-1.4 0-2.5-.5-3-1.5"/></svg>';
+    var IC_PPL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.4"/><path d="M3.5 20c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M15.8 15.2c2.5.1 4.2 1.6 4.7 4.6"/></svg>';
+    var IC_BEL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 10a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 14 6 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg>';
+    var IC_HRG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h10M7 21h10M8 3c0 7 8 7 8 11.5V21M16 3c0 7-8 7-8 11.5V21"/></svg>';
+
+    function stat(icon, n, label, detail, go) {
+      return '<div class="stat' + (go ? ' tappable" role="button" tabindex="0" data-go="' + go + '"' : '"') + '>' +
+        '<span class="ic">' + icon + "</span>" +
+        '<div class="n">' + n + "</div>" +
+        '<div class="l">' + label + "</div>" +
+        (detail ? '<div class="d">' + detail + "</div>" : "") +
+        "</div>";
+    }
+    $("stat-grid").innerHTML =
+      stat(IC_CAL, todays.length, "Today's appointments", esc(fmtDateLong(t).split(",")[0]), "calendar") +
+      stat(IC_CLK, upcoming.length, "Coming up, next 7 days", "requests included", "bookings") +
+      // "On the books", never "revenue": these are listed prices of confirmed
+      // and completed appointments, not cash collected, and a "$50+" price
+      // counts its floor.
+      stat(IC_DLR, money0(weekBooked), "On the books this week", "listed prices, not cash collected", null) +
+      stat(IC_PPL, newClients, "New clients this week", "", "clients") +
+      stat(IC_BEL, pending.length, "Not locked in yet", pending.length ? "requests and unpaid deposits" : "", "bookings") +
+      stat(IC_HRG, waiting, "Waiting for an opening", waiting ? "tap to see which days" : "", "calendar");
+
+    // today's agenda
+    var ag = todays.slice().sort(byDateTimeAsc).map(function (b) {
+      return "<li><span class=\"at\">" + esc(fmtTime(b.time)) + "</span>" +
+        "<span><span class=\"who\">" + esc(b.client_name || b.client_email || "Client") + "</span>" +
+        " <span class=\"what\">" + esc(b.service_name || "") + "</span></span></li>";
+    }).join("");
+    $("home-agenda").innerHTML = ag;
+    $("home-agenda-empty").hidden = !!ag;
+
+    // week bars scale to the best day; a flat zero week draws flat stubs
+    var max = 1;
+    week.forEach(function (d) { if (perDay[d] > max) max = perDay[d]; });
+    var DL = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    // Buttons, not divs: the number behind a bar has to be reachable by a
+    // thumb and a screen reader, not only a mouse hover.
+    $("week-bars").innerHTML = week.map(function (d, i) {
+      var h = Math.round((perDay[d] / max) * 100);
+      return '<button type="button" class="wb" data-day-label="' + esc(DL[i] + ": " + money0(perDay[d])) + '" aria-label="' + esc(DL[i] + ", " + money0(perDay[d]) + " on the books") + '">' +
+        '<div class="bar' + (d === t ? " today" : "") + '" style="height:' + Math.max(3, h) + '%"></div>' +
+        '<span class="dl" aria-hidden="true">' + DL[i] + "</span></button>";
+    }).join("");
+    var totalLine = "On the books this week: <b>" + money0(weekBooked) + "</b>";
+    $("week-total").innerHTML = totalLine;
+    $("week-bars").onclick = function (e) {
+      var b = e.target.closest(".wb");
+      $("week-total").innerHTML = b
+        ? esc(b.getAttribute("data-day-label")) + " &middot; week " + money0(weekBooked)
+        : totalLine;
+    };
+
+    // recent reviews (approved, newest first, top 3)
+    var recent = state.reviews
+      .filter(function (r) { return r.status === "approved"; })
+      .slice()
+      .sort(function (a, b2) { return String(b2.ts).localeCompare(String(a.ts)); })
+      .slice(0, 3);
+    $("home-reviews").innerHTML = recent.map(function (r) {
+      var n = Math.max(1, Math.min(5, Number(r.rating) || 5));
+      var stars = "★★★★★".slice(0, n);
+      return '<div class="mini-review"><div class="rname">' + esc(r.name || "") +
+        ' <span class="stars" aria-hidden="true">' + stars + "</span>" +
+        '<span class="sr-only">rated ' + n + " out of 5</span></div>" +
+        (r.body ? '<p class="rbody">' + esc(r.body) + "</p>" : "") + "</div>";
+    }).join("");
+    $("home-reviews-empty").hidden = recent.length > 0;
   }
 
   // ---------------- bookings view ----------------
   function needsAttention(b) { return b.status === "awaiting_deposit" || b.status === "request"; }
   function isActive(b) { return b.status === "awaiting_deposit" || b.status === "request" || b.status === "confirmed"; }
 
+  // Badges live in three places now (sidebar, phone bar, More sheet), so
+  // they are classes, not ids: every copy updates or the phone one lies.
+  function paintBadges(cls, n, srText) {
+    document.querySelectorAll("." + cls).forEach(function (el) {
+      if (n > 0) {
+        el.innerHTML = n + '<span class="sr-only"> ' + srText + "</span>";
+        el.hidden = false;
+      } else {
+        el.hidden = true;
+      }
+    });
+  }
   function updateBadge() {
-    var n = state.bookings.filter(needsAttention).length;
-    var el = $("attention-badge");
-    if (n > 0) {
-      el.innerHTML = n + '<span class="sr-only"> need attention</span>';
-      el.hidden = false;
-    } else {
-      el.hidden = true;
-    }
+    paintBadges("attention-badge", state.bookings.filter(needsAttention).length, "need attention");
   }
 
   function groupBookings(list) {
@@ -1207,14 +1352,7 @@
   // ---------------- reviews view ----------------
   function updateReviewsBadge() {
     var n = state.reviews.filter(function (r) { return r.status === "pending"; }).length;
-    var el = $("reviews-badge");
-    if (!el) return;
-    if (n > 0) {
-      el.innerHTML = n + '<span class="sr-only"> waiting for approval</span>';
-      el.hidden = false;
-    } else {
-      el.hidden = true;
-    }
+    paintBadges("reviews-badge", n, "reviews waiting for approval");
   }
 
   var REVIEW_STATUS_META = {
@@ -1523,14 +1661,27 @@
     $("outbox-fab").focus();
   }
 
-  // ---------------- tabs ----------------
+  // ---------------- navigation ----------------
+  // One list of views, three ways in: the sidebar (desktop), the bottom bar
+  // (phone, first-class few), and the More sheet (phone, the rest).
+  // Filled in by wire(); switchView runs before wiring only for the initial
+  // render, when no sheet can be open.
+  var closeMore = function () {};
+  var openMore = function () {};
   function switchView(v) {
+    if (v === "more") { openMore(); return; }
+    closeMore();
     state.view = v;
-    var tabs = document.querySelectorAll(".tab");
-    tabs.forEach(function (t) {
-      t.setAttribute("aria-pressed", String(t.getAttribute("data-view") === v));
+    var OVERFLOW = ["clients", "menu", "reviews", "broadcast", "hours"];
+    document.querySelectorAll(".tab, .bn-item").forEach(function (t) {
+      var mine = t.getAttribute("data-view");
+      // On the phone bar, views that live behind More light up More itself,
+      // so the bar always shows where she is.
+      var on = mine === v ||
+        (mine === "more" && t.classList.contains("bn-item") && OVERFLOW.indexOf(v) !== -1);
+      t.setAttribute("aria-pressed", String(on));
     });
-    ["bookings", "calendar", "hours", "menu", "clients", "reviews", "broadcast"].forEach(function (name) {
+    ["home", "bookings", "calendar", "hours", "menu", "clients", "reviews", "broadcast"].forEach(function (name) {
       var el = $("view-" + name);
       if (name === v) {
         if (el.hidden) {
@@ -1543,6 +1694,7 @@
         el.hidden = true;
       }
     });
+    if (v === "home") renderHome();
     if (v === "bookings") { renderBookings(); updateBadge(); }
     if (v === "calendar") { renderCalendar(); renderDayPanel(); }
     if (v === "hours") {
@@ -1585,6 +1737,200 @@
   function wire() {
     // ---- login: password, Google, code fallback ----
     $("setpw-hint").textContent = window.SP.PASSWORD_HINT;
+
+    // ---- sheet/dialog plumbing, shared by More and Add Booking ----
+    // Open: remember where focus was, move it in, lock the page scroll, and
+    // put one entry on the history stack so the phone's back gesture closes
+    // the sheet instead of leaving the dashboard. Close: undo all of it.
+    var openSheet = null; // { modal, scrim, restoreFocus }
+    function sheetOpen(modalId, scrimId, focusSel) {
+      sheetClose(true);
+      var modal = $(modalId), scrim = $(scrimId);
+      modal.hidden = false; scrim.hidden = false;
+      document.body.style.overflow = "hidden";
+      openSheet = { modal: modal, scrim: scrim, restoreFocus: document.activeElement };
+      var f = focusSel ? modal.querySelector(focusSel) : null;
+      (f || modal.querySelector("button, [href], input, select, textarea") || modal).focus();
+      try { history.pushState({ spSheet: true }, ""); } catch (e) {}
+    }
+    function sheetClose(skipHistory) {
+      if (!openSheet) return;
+      openSheet.modal.hidden = true;
+      openSheet.scrim.hidden = true;
+      document.body.style.overflow = "";
+      var back = openSheet.restoreFocus;
+      openSheet = null;
+      if (!skipHistory && history.state && history.state.spSheet) {
+        try { history.back(); } catch (e) {}
+      }
+      // After the history pop settles, or the browser steals focus back.
+      if (back && back.focus) setTimeout(function () { back.focus(); }, 0);
+    }
+    window.addEventListener("popstate", function () { sheetClose(true); });
+    document.addEventListener("keydown", function (e) {
+      if (!openSheet) return;
+      if (e.key === "Escape") { e.preventDefault(); sheetClose(); return; }
+      if (e.key !== "Tab") return;
+      // Keep Tab inside the open sheet: cheap trap, both directions.
+      var els = openSheet.modal.querySelectorAll("button, [href], input:not([hidden]), select, textarea");
+      if (!els.length) return;
+      var first = els[0], last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+
+    // ---- shell navigation: sidebar, bottom bar, More sheet, data-go ----
+    document.querySelectorAll(".bn-item").forEach(function (t) {
+      t.addEventListener("click", function () { t.focus(); switchView(t.getAttribute("data-view")); });
+    });
+    openMore = function () { sheetOpen("more-sheet", "more-scrim"); };
+    closeMore = function () { sheetClose(); };
+    $("more-close").addEventListener("click", closeMore);
+    $("more-scrim").addEventListener("click", closeMore);
+    $("more-sheet").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-view]");
+      if (b) switchView(b.getAttribute("data-view"));
+    });
+    // Anything with data-go is a shortcut into a view (stat cards, "View all").
+    document.addEventListener("click", function (e) {
+      var g = e.target.closest("[data-go]");
+      if (g) switchView(g.getAttribute("data-go"));
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var g = e.target.closest && e.target.closest(".stat[data-go]");
+      if (g) { e.preventDefault(); switchView(g.getAttribute("data-go")); }
+    });
+    $("qa-site").addEventListener("click", function () { window.open("index.html", "_blank"); });
+
+    // ---- add booking: walk-ins and phone calls, straight onto her book ----
+    function abOpen() {
+      sheetOpen("ab-modal", "ab-scrim", "#ab-service");
+      $("ab-error").hidden = true;
+      // The modal can sit open (or the tab sleep) across midnight; a date in
+      // the past would sail through the picker and 409 at the server.
+      var t = todayStr();
+      $("ab-date").min = t;
+      if (!$("ab-date").value || $("ab-date").value < t) { $("ab-date").value = t; }
+      abFillServices();
+    }
+    function abClose() { sheetClose(); }
+    ["ab-open-top", "ab-open-fab", "qa-add"].forEach(function (id) {
+      // Focus the trigger first: a tap (and a JS click) never focuses a
+      // button, so "restore focus on close" would land on <body>.
+      $(id).addEventListener("click", function () { this.focus(); abOpen(); });
+    });
+    $("ab-close").addEventListener("click", abClose);
+    $("ab-scrim").addEventListener("click", abClose);
+
+    // The style list is her live menu, grouped the way her site shows it.
+    // Loaded lazily the first time the modal opens, reused after.
+    function abFillServices() {
+      var sel = $("ab-service");
+      var fill = function () {
+        var had = sel.value;
+        var byCat = {};
+        state.services.forEach(function (r) {
+          if (!r.active) return;
+          (byCat[r.cat] = byCat[r.cat] || []).push(r);
+        });
+        sel.innerHTML = '<option value="">Pick a style</option>' + Object.keys(byCat).map(function (c) {
+          return '<optgroup label="' + esc(c) + '">' + byCat[c].map(function (r) {
+            return '<option value="' + esc(r.service_id) + '">' + esc(r.name) + " · " + esc(r.price) + "</option>";
+          }).join("") + "</optgroup>";
+        }).join("");
+        if (had) sel.value = had;
+        abLoadTimes();
+      };
+      if (state.services.length) return fill();
+      api("/api/admin/services").then(function (res) {
+        state.services = (res && res.services) || [];
+        fill();
+      }).catch(function (err) { abSay(errMsg(err)); });
+    }
+
+    function abSay(text) {
+      var el = $("ab-error");
+      el.textContent = text || "";
+      el.hidden = !text;
+    }
+
+    // Times come from the same availability engine her clients book against,
+    // so she can never be offered a slot that would double-book her chair.
+    var abSeq = 0;
+    function abLoadTimes() {
+      var svc = $("ab-service").value;
+      var date = $("ab-date").value;
+      var sel = $("ab-time");
+      if (!svc || !date) {
+        sel.disabled = true;
+        sel.innerHTML = '<option value="">' + (svc ? "Pick a day" : "Pick a style first") + "</option>";
+        return;
+      }
+      var seq = ++abSeq;
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">Checking your book…</option>';
+      api("/api/availability?service_id=" + encodeURIComponent(svc) + "&date=" + encodeURIComponent(date))
+        .then(function (av) {
+          if (seq !== abSeq) return;
+          if (av.closed || av.blocked || !av.slots.length) {
+            var why = av.closed ? "You are closed that day." : av.blocked ? "You blocked that day." : "No open times left that day.";
+            sel.innerHTML = '<option value="">' + why.replace(/\.$/, "") + "</option>";
+            abSay(why + " Pick another day.");
+            return;
+          }
+          abSay("");
+          var had = sel.value;
+          sel.innerHTML = '<option value="">Pick a time</option>' + av.slots.map(function (t) {
+            return '<option value="' + esc(t) + '">' + esc(fmtTime(t)) + "</option>";
+          }).join("");
+          if (had && av.slots.indexOf(had) !== -1) sel.value = had;
+          sel.disabled = false;
+        })
+        .catch(function (err) {
+          if (seq !== abSeq) return;
+          sel.innerHTML = '<option value="">Could not load times</option>';
+          abSay(errMsg(err));
+        });
+    }
+    $("ab-service").addEventListener("change", abLoadTimes);
+    $("ab-date").addEventListener("change", abLoadTimes);
+
+    $("ab-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var email = $("ab-email").value.trim().toLowerCase();
+      var svc = $("ab-service").value;
+      var date = $("ab-date").value;
+      var time = $("ab-time").value;
+      if (!svc) return abSay("Pick a style.");
+      if (!date) return abSay("Pick a day.");
+      if (!time) return abSay("Pick a time.");
+      if (!window.SP.emailLooksOk(email)) return abSay("Enter the client's email address.");
+      var btn = $("ab-submit");
+      btn.disabled = true;
+      abSay("");
+      apiPost("/api/admin/bookings", {
+        email: email,
+        name: $("ab-name").value.trim(),
+        phone: $("ab-phone").value.trim(),
+        service_id: svc,
+        date: date,
+        time: time,
+        notes: $("ab-notes").value.trim(),
+      }).then(function (res) {
+        btn.disabled = false;
+        if (res && res.booking) replaceBooking(res.booking);
+        abClose();
+        ["ab-email", "ab-name", "ab-phone", "ab-notes", "ab-time"].forEach(function (id) { $(id).value = ""; });
+        toast("On the book. " + (res && res.booking ? fmtDateLong(res.booking.date) + " at " + fmtTime(res.booking.time) : ""));
+        refreshBookings();
+      }).catch(function (err) {
+        btn.disabled = false;
+        abSay(errMsg(err));
+        // The slot may have just been taken; show her what is still open.
+        if (err && err.status === 409) abLoadTimes();
+      });
+    });
 
     // "+ New category…" swaps in a text box; picking a real one hides it.
     $("ma-cat").addEventListener("change", function () {

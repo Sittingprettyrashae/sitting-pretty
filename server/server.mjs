@@ -1636,7 +1636,13 @@ async function handleApi(req, res, url) {
     if (dirty) save();
     return sendJson(res, 200, {
       client: publicClient(client),
-      bookings: bookings.map(withMoney)
+      // notes never goes back to the client: since Add Booking it can hold
+      // Ebony's own annotation about them (me.ts does the same).
+      bookings: bookings.map((b) => {
+        const pub = { ...withMoney(b) };
+        delete pub.notes;
+        return pub;
+      })
     });
   }
 
@@ -2214,6 +2220,59 @@ async function handleApi(req, res, url) {
   }
 
   // Her waitlist, newest first.
+  // The walk-in and the phone call: Ebony books someone by hand. Skips the
+  // deposit gate (money settles in the chair) and lands confirmed. A new
+  // email gets an account made for it, so that person can sign in later and
+  // find the appointment waiting (admin.ts adminCreateBooking).
+  if (method === 'POST' && p === '/api/admin/bookings') {
+    requireAdmin(req);
+    const body = await readBody(req);
+    const email = cleanStr(body.email, 254).toLowerCase();
+    const name = cleanStr(body.name, 120);
+    const phone = cleanStr(body.phone, 40);
+    const serviceId = cleanStr(body.service_id, 120);
+    const date = cleanStr(body.date, 10);
+    const time = cleanStr(body.time, 5);
+    const notes = cleanStr(body.notes, 1000);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new ApiError(400, "Enter the client's email address.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError(400, 'date must be YYYY-MM-DD');
+    if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) throw new ApiError(400, 'time must be HH:MM');
+    const svc = liveCatalog().byId.get(serviceId);
+    if (!svc) throw new ApiError(400, 'Pick a style from your menu.');
+    const av = availability(svc, date);
+    if (av.closed) throw new ApiError(409, 'You are closed that day.');
+    if (av.blocked) throw new ApiError(409, 'You blocked that day.');
+    if (!av.slots.includes(time)) throw new ApiError(409, 'That time is already taken. Pick another slot.');
+    let client = findClientByEmail(email);
+    if (!client) {
+      client = makeClient(email, name || null, phone || null, ADMIN_EMAILS.includes(email), { auth_provider: 'code' });
+    } else {
+      if (name && !client.name) client.name = name;
+      if (phone && !client.phone) client.phone = phone;
+    }
+    const booking = {
+      id: nextId('bk'),
+      client_id: client.id,
+      client_name: name || client.name,
+      client_email: client.email,
+      client_phone: phone || client.phone,
+      service_id: svc.service_id,
+      service_name: svc.name,
+      price: svc.price,
+      deposit_cents: svc.deposit_cents ?? null,
+      date, time,
+      duration_min: svc.duration_min,
+      status: 'confirmed',
+      notes,
+      created_at: new Date().toISOString(),
+    };
+    db.bookings.push(booking);
+    save();
+    notify('booking_confirmed', { email: client.email, phone: client.phone, name: booking.client_name },
+      { booking, balance_cents: balanceCentsFor(booking) });
+    return sendJson(res, 200, { booking: withMoney(booking) });
+  }
+
   if (method === 'GET' && p === '/api/admin/leads') {
     requireAdmin(req);
     const leads = db.leads.slice()

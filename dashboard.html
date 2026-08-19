@@ -50,8 +50,159 @@ img{max-width:100%;display:block}
 }
 .topbar .spacer{flex:1}
 
-/* ---------- layout ---------- */
+/* ---------- layout ----------
+   Desktop: a fixed sidebar and a wide working column, the shape of a tool she
+   sits down at. Phone: the sidebar folds into a bottom tab bar with a raised
+   "+" for a new booking, the shape of an app she runs her day from. */
 main{max-width:680px;margin:0 auto;padding:0 1rem 6rem}
+body.in-app main{max-width:none;margin:0;padding:0}
+.shell{display:flex;min-height:calc(100vh - var(--topbar-h))}
+.sidenav{
+  display:none;flex-direction:column;gap:.15rem;flex-shrink:0;width:230px;
+  position:sticky;top:var(--topbar-h);height:calc(100vh - var(--topbar-h));
+  padding:1.2rem .8rem 1rem;border-right:1px solid var(--line);background:var(--surface);
+  overflow-y:auto;
+}
+.sidenav .tab{
+  display:flex;align-items:center;gap:.65rem;width:100%;
+  border:none;background:none;border-radius:.8rem;
+  padding:.62rem .8rem;min-height:42px;font-size:.92rem;
+}
+.sidenav .tab svg{flex-shrink:0;opacity:.75}
+.sidenav .tab[aria-pressed="true"]{background:var(--rose-soft);color:var(--rose-deep)}
+.sidenav .tab[aria-pressed="true"] svg{opacity:1}
+.sidenav .tab .badge{margin-left:auto;background:var(--rose);color:oklch(98% 0.008 30)}
+.sidenav-foot{
+  margin-top:auto;padding:.9rem .5rem 0;border-top:1px dashed var(--line-strong);
+  font-family:var(--font-script);font-size:1.05rem;color:var(--ink-faint);
+}
+.workarea{flex:1;min-width:0;max-width:1120px;padding:1.2rem 1.1rem 6.5rem}
+.work-head{display:flex;align-items:flex-start;gap:1rem;margin-bottom:1.2rem}
+.work-head h1{font-size:1.45rem;font-weight:900;letter-spacing:-.01em;line-height:1.2}
+.work-head .sub{color:var(--ink-dim);font-size:.92rem;margin-top:.15rem}
+.work-head .spacer{flex:1}
+@media (min-width: 900px){
+  .sidenav{display:flex}
+  .bottomnav{display:none}
+  .workarea{padding:1.6rem 2rem 4rem}
+  .work-head h1{font-size:1.7rem}
+}
+
+/* bottom tab bar (phone) */
+.bottomnav{
+  position:fixed;left:0;right:0;bottom:0;z-index:60;
+  display:grid;grid-template-columns:repeat(5,1fr);align-items:end;
+  background:var(--surface);border-top:1px solid var(--line);
+  padding:.35rem .4rem calc(.35rem + env(safe-area-inset-bottom));
+}
+.bn-item{
+  position:relative;
+  display:flex;flex-direction:column;align-items:center;gap:.15rem;
+  border:none;background:none;font:inherit;font-size:.7rem;font-weight:700;
+  color:var(--ink-dim);padding:.3rem .2rem;min-height:48px;cursor:pointer;border-radius:.7rem;
+}
+.qa{position:relative}
+.bn-item svg{opacity:.8}
+.bn-item[aria-pressed="true"]{color:var(--rose-deep)}
+.bn-item[aria-pressed="true"] svg{opacity:1}
+.bn-item .badge{position:absolute;transform:translate(14px,-4px);background:var(--rose);color:oklch(98% 0.008 30)}
+.bn-plus{
+  display:flex;align-items:center;justify-content:center;
+  width:52px;height:52px;margin:-1.4rem auto 0;border-radius:50%;
+  background:var(--rose);color:oklch(98% 0.008 30);border:4px solid var(--bg);
+  font-size:1.7rem;line-height:1;cursor:pointer;box-shadow:var(--shadow-soft);
+}
+.bn-plus:active{transform:scale(.94)}
+/* This hide must sit AFTER .bottomnav's base rule: same specificity, so
+   source order is the tiebreak, and putting it earlier left the phone bar
+   painted across desktop. */
+@media (min-width:900px){.bottomnav{display:none}}
+
+/* home: stat cards */
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.7rem;margin-bottom:1.3rem}
+@media (min-width:720px){.stat-grid{grid-template-columns:repeat(3,1fr)}}
+@media (min-width:1050px){.stat-grid{grid-template-columns:repeat(6,1fr)}}
+.stat{
+  background:var(--surface);border:1px solid var(--line);border-radius:1rem;
+  padding:.85rem .95rem;box-shadow:var(--shadow-soft);
+}
+.stat .ic{
+  display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;
+  border-radius:50%;background:var(--rose-soft);color:var(--rose-deep);margin-bottom:.45rem;
+}
+.stat .n{font-size:1.35rem;font-weight:900;letter-spacing:-.02em;line-height:1.1}
+.stat .l{font-size:.72rem;font-weight:700;color:var(--ink-dim);margin-top:.1rem;line-height:1.3}
+.stat .d{font-size:.7rem;color:var(--ink-faint);margin-top:.2rem}
+.stat.tappable{cursor:pointer;position:relative;transition:transform .16s var(--ease-out), box-shadow .16s var(--ease-out)}
+.stat.tappable::after{content:"›";position:absolute;top:.55rem;right:.75rem;color:var(--ink-faint);font-weight:900;font-size:1rem}
+.stat.tappable:hover{box-shadow:0 4px 14px oklch(60% 0.08 350 / .18)}
+.stat.tappable:active{transform:scale(.97)}
+
+/* home: cards + layout */
+.home-cols{display:grid;grid-template-columns:1fr;gap:1rem}
+@media (min-width:980px){.home-cols{grid-template-columns:1.4fr 1fr}}
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:1.1rem;
+  padding:1.05rem 1.1rem;box-shadow:var(--shadow-soft);
+}
+.card > h3{font-size:.98rem;font-weight:900;margin-bottom:.7rem;display:flex;align-items:center;gap:.5rem}
+.card > h3 .see{margin-left:auto;font-size:.78rem;font-weight:700;color:var(--rose);background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;text-underline-offset:2px}
+.qa-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem}
+.qa{
+  display:flex;flex-direction:column;align-items:center;gap:.4rem;
+  font:inherit;font-weight:700;font-size:.8rem;color:var(--ink);
+  background:var(--surface);border:1px solid var(--line);border-radius:.9rem;
+  padding:.9rem .5rem;cursor:pointer;transition:transform .16s var(--ease-out), background .16s var(--ease-out);
+}
+.qa:active{transform:scale(.96)}
+.qa:hover{background:var(--rose-soft)}
+.qa .ic{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:var(--rose-soft);color:var(--rose-deep)}
+.agenda{list-style:none}
+.agenda li{display:flex;gap:.75rem;padding:.55rem 0;border-bottom:1px dashed var(--line);align-items:baseline}
+.agenda li > span:last-child{min-width:0;overflow-wrap:anywhere}
+.agenda li:last-child{border-bottom:none}
+.agenda .at{font-weight:900;font-size:.85rem;color:var(--rose-deep);white-space:nowrap;min-width:4.4rem}
+.agenda .who{font-weight:700;font-size:.92rem}
+.agenda .what{color:var(--ink-dim);font-size:.83rem}
+.home-empty{color:var(--ink-faint);font-size:.9rem;padding:.4rem 0}
+/* week bars: real numbers only, drawn as plain divs */
+.week-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:.45rem;align-items:end;height:110px;margin:.4rem 0 .2rem}
+.week-bars .wb{
+  display:flex;flex-direction:column;align-items:center;gap:.3rem;height:100%;justify-content:flex-end;
+  border:none;background:none;font:inherit;padding:0;cursor:pointer;border-radius:.5rem;
+}
+.week-bars .wb:hover .bar{background:var(--rose)}
+.week-bars .bar{width:100%;max-width:34px;border-radius:.45rem .45rem 0 0;background:var(--rose-soft);min-height:3px}
+.week-bars .bar.today{background:var(--rose)}
+.week-bars .dl{font-size:.66rem;font-weight:700;color:var(--ink-faint)}
+.week-total{font-size:.85rem;color:var(--ink-dim);border-top:1px dashed var(--line);padding-top:.6rem;margin-top:.4rem}
+.week-total b{color:var(--ink)}
+.mini-review{padding:.55rem 0;border-bottom:1px dashed var(--line)}
+.mini-review:last-child{border-bottom:none}
+.mini-review .rname{font-weight:700;font-size:.88rem;display:flex;gap:.5rem;align-items:baseline}
+.mini-review .stars{color:var(--champagne);letter-spacing:.1em;font-size:.8rem}
+.mini-review .rbody{color:var(--ink-dim);font-size:.85rem;margin-top:.15rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* add booking modal */
+.ab-scrim{position:fixed;inset:0;z-index:80;background:oklch(20% 0.03 350 / .45);backdrop-filter:blur(3px)}
+.ab-modal{
+  position:fixed;z-index:81;left:50%;transform:translateX(-50%);
+  bottom:0;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;
+  background:var(--surface);border-radius:1.2rem 1.2rem 0 0;border:1px solid var(--line);
+  padding:1.1rem 1.15rem calc(1.2rem + env(safe-area-inset-bottom));
+  animation:rise .22s var(--ease-out) both;
+}
+@media (min-width:720px){
+  .ab-modal{bottom:auto;top:50%;transform:translate(-50%,-50%);border-radius:1.2rem}
+}
+.ab-modal h2{font-size:1.15rem;font-weight:900;margin-bottom:.2rem}
+.ab-sub{color:var(--ink-dim);font-size:.86rem;margin-bottom:.9rem}
+.ab-modal form{display:flex;flex-direction:column;gap:.65rem}
+.ab-row{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.ab-error{color:var(--danger);font-weight:700;font-size:.87rem}
+.ab-head{display:flex;align-items:center}
+.ab-head .x{margin-left:auto;border:none;background:none;font-size:1.4rem;color:var(--ink-faint);cursor:pointer;padding:.2rem .5rem;border-radius:.6rem}
+.ab-head .x:hover{background:var(--rose-soft)}
 .splash{padding:5rem 1rem;text-align:center;color:var(--ink-faint)}
 
 /* ---------- login ---------- */
@@ -547,11 +698,19 @@ button.cal-day:hover{border-color:var(--rose)}
 }
 .toast.show{opacity:1;transform:translate(-50%, 0)}
 
+/* the demo outbox helper must not sit on the phone tab bar */
+@media (max-width:899px){
+  .outbox-fab{bottom:calc(74px + env(safe-area-inset-bottom))}
+}
+
 @media (prefers-reduced-motion: reduce){
   .view-in,.login-card,.day-panel,.confirm-box,.affected-box,.flyer-preview{animation:none}
   .drawer,.scrim,.toast,.hswitch-track,.hswitch-thumb{transition:none}
+  .ab-modal,.more-sheet{animation:none}
+  .ab-scrim{backdrop-filter:none}
   .btn:active,.tab:active,.pill:active,.suggest:active,.outbox-fab:active,
-  .hswitch:active,.hcopy:active,.file-btn:active{transform:none}
+  .hswitch:active,.hcopy:active,.file-btn:active,
+  .qa:active,.bn-plus:active,.stat.tappable:active,.bn-item:active{transform:none}
 }
 </style>
 </head>
@@ -625,15 +784,63 @@ button.cal-day:hover{border-color:var(--rose)}
   </section>
 
   <section id="app-view" hidden>
-    <nav class="tabs" aria-label="Dashboard sections">
-      <button class="tab" data-view="bookings" aria-pressed="true">Bookings<span id="attention-badge" class="badge" hidden></span></button>
-      <button class="tab" data-view="calendar" aria-pressed="false">Calendar</button>
-      <button class="tab" data-view="hours" aria-pressed="false">Hours</button>
-      <button class="tab" data-view="menu" aria-pressed="false">Menu</button>
-      <button class="tab" data-view="clients" aria-pressed="false">Clients</button>
-      <button class="tab" data-view="reviews" aria-pressed="false">Reviews<span id="reviews-badge" class="badge" hidden></span></button>
-      <button class="tab" data-view="broadcast" aria-pressed="false">Message everyone</button>
-    </nav>
+   <div class="shell">
+    <aside class="sidenav" aria-label="Dashboard sections">
+      <button class="tab" data-view="home" aria-pressed="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg><span>Home</span></button>
+      <button class="tab" data-view="bookings" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg><span>Bookings</span><span class="badge attention-badge" hidden></span></button>
+      <button class="tab" data-view="calendar" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16M9 15h.5M14.5 15h.5M9 18h.5"/></svg><span>Calendar</span></button>
+      <button class="tab" data-view="clients" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.4"/><path d="M3.5 20c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M15.8 15.2c2.5.1 4.2 1.6 4.7 4.6"/></svg><span>Clients &amp; waitlist</span></button>
+      <button class="tab" data-view="menu" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg><span>Your menu</span></button>
+      <button class="tab" data-view="reviews" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.2 18.9l1-5.4-4-3.8 5.4-.7Z"/></svg><span>Reviews</span><span class="badge reviews-badge" hidden></span></button>
+      <button class="tab" data-view="broadcast" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg><span>Message everyone</span></button>
+      <button class="tab" data-view="hours" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>Hours</span></button>
+      <div class="sidenav-foot">Sitting Pretty Rashae&rsquo;s</div>
+    </aside>
+
+    <div class="workarea">
+    <header class="work-head">
+      <div>
+        <h1 id="hello-line">Welcome back 👋</h1>
+        <p class="sub" id="hello-sub">Your day, your book, your money. All on one page.</p>
+      </div>
+      <span class="spacer"></span>
+      <button id="ab-open-top" class="btn btn-solid btn-sm" type="button">+ Add booking</button>
+    </header>
+
+    <!-- ---------- home ---------- -->
+    <section id="view-home" class="view" aria-label="Overview">
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="home-cols">
+        <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
+          <div class="card">
+            <h3>Today <button class="see" type="button" data-go="calendar">Full calendar</button></h3>
+            <ul class="agenda" id="home-agenda"></ul>
+            <p class="home-empty" id="home-agenda-empty" hidden>Nothing on the book today.</p>
+          </div>
+          <div class="card">
+            <h3>This week at a glance</h3>
+            <div class="week-bars" id="week-bars" role="img" aria-label="Booked value per day this week"></div>
+            <p class="week-total" id="week-total"></p>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1rem;min-width:0">
+          <div class="card">
+            <h3>Quick actions</h3>
+            <div class="qa-grid">
+              <button class="qa" type="button" id="qa-add"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg></span>Add booking</button>
+              <button class="qa" type="button" data-go="calendar"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16M9 15h.5M14.5 15h.5M9 18h.5"/></svg></span>Block a day</button>
+              <button class="qa" type="button" data-go="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Message everyone</button>
+              <button class="qa" type="button" id="qa-site"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span>See your site</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Recent reviews <button class="see" type="button" data-go="reviews">View all</button></h3>
+            <div id="home-reviews"></div>
+            <p class="home-empty" id="home-reviews-empty" hidden>No reviews yet.</p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section id="view-bookings" class="view" aria-label="Bookings">
       <div class="filters" role="group" aria-label="Filter bookings">
@@ -787,6 +994,67 @@ button.cal-day:hover{border-color:var(--rose)}
         <p id="bc-result" class="bc-result" role="status" hidden></p>
       </div>
     </section>
+    </div><!-- /workarea -->
+   </div><!-- /shell -->
+
+    <nav class="bottomnav" aria-label="Dashboard sections">
+      <button class="bn-item" data-view="home" aria-pressed="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</button>
+      <button class="bn-item" data-view="bookings" aria-pressed="false"><span class="badge attention-badge" hidden></span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>Bookings</button>
+      <button class="bn-plus" id="ab-open-fab" type="button" aria-label="Add a booking">+</button>
+      <button class="bn-item" data-view="calendar" aria-pressed="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16M9 15h.5M14.5 15h.5M9 18h.5"/></svg>Calendar</button>
+      <button class="bn-item" data-view="more" aria-pressed="false"><span class="badge reviews-badge" hidden></span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg>More</button>
+    </nav>
+
+    <!-- "More" sheet on phones: the sections that do not fit the bar -->
+    <div id="more-scrim" class="ab-scrim" hidden></div>
+    <div id="more-sheet" class="ab-modal" role="dialog" aria-modal="true" aria-label="More sections" hidden>
+      <div class="ab-head"><h2>More</h2><button class="x" type="button" id="more-close" aria-label="Close">&times;</button></div>
+      <div class="qa-grid" style="margin-top:.6rem">
+        <button class="qa" type="button" data-view="clients"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8.5" r="3.4"/><path d="M3.5 20c.6-3.4 2.8-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M15.8 15.2c2.5.1 4.2 1.6 4.7 4.6"/></svg></span>Clients &amp; waitlist</button>
+        <button class="qa" type="button" data-view="menu"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg></span>Your menu</button>
+        <button class="qa" type="button" data-view="reviews"><span class="badge reviews-badge" hidden style="position:absolute;transform:translate(46px,-6px)"></span><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 2.4 5 5.4.7-4 3.8 1 5.4L12 16.3 7.2 18.9l1-5.4-4-3.8 5.4-.7Z"/></svg></span>Reviews</button>
+        <button class="qa" type="button" data-view="broadcast"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-9.5 9.5M21 3l-6.5 18-3-8.5L3 9.5Z"/></svg></span>Message everyone</button>
+        <button class="qa" type="button" data-view="hours"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>Hours</button>
+      </div>
+    </div>
+
+    <!-- ---------- add booking ---------- -->
+    <div id="ab-scrim" class="ab-scrim" hidden></div>
+    <div id="ab-modal" class="ab-modal" role="dialog" aria-modal="true" aria-label="Add a booking" hidden>
+      <div class="ab-head"><h2>Add a booking</h2><button class="x" type="button" id="ab-close" aria-label="Close">&times;</button></div>
+      <p class="ab-sub">For walk-ins and phone bookings. It goes on your book as confirmed, the client gets the confirmation email, and you settle the money in the chair.</p>
+      <form id="ab-form" novalidate>
+        <label class="field-label" for="ab-service">Style</label>
+        <select id="ab-service" class="field" required></select>
+        <div class="ab-row">
+          <div>
+            <label class="field-label" for="ab-date">Day</label>
+            <input id="ab-date" class="field" type="date" required>
+          </div>
+          <div>
+            <label class="field-label" for="ab-time">Time</label>
+            <select id="ab-time" class="field" required disabled><option value="">Pick a style first</option></select>
+          </div>
+        </div>
+        <label class="field-label" for="ab-email">Client email</label>
+        <input id="ab-email" class="field" type="email" placeholder="client@example.com" autocomplete="off" required>
+        <p class="field-hint">New email? An account is made for them, so they can sign in later and see this appointment.</p>
+        <div class="ab-row">
+          <div>
+            <label class="field-label" for="ab-name">Name</label>
+            <input id="ab-name" class="field" placeholder="First and last" autocomplete="off">
+          </div>
+          <div>
+            <label class="field-label" for="ab-phone">Cell</label>
+            <input id="ab-phone" class="field" type="tel" placeholder="(555) 555-5555" autocomplete="off">
+          </div>
+        </div>
+        <label class="field-label" for="ab-notes">Notes for you (optional)</label>
+        <input id="ab-notes" class="field" placeholder="Anything worth remembering" autocomplete="off">
+        <p id="ab-error" class="ab-error" role="alert" hidden></p>
+        <button id="ab-submit" class="btn btn-solid btn-wide" type="submit">Put it on the book</button>
+      </form>
+    </div>
   </section>
 </main>
 

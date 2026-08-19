@@ -130,11 +130,18 @@ export function renderNotification(event, data) {
       // Deposit is in, so the time is hers and nobody else can take it. Say
       // plainly what is still owed and that either way of paying is fine.
       const bal = d.balance_cents;
+      // "Your deposit is paid" only when money actually landed: a walk-in
+      // Ebony adds by hand has paid nothing yet, and production gates the
+      // same line on paid_cents (notify.ts tplBookingConfirmed heldLine).
+      const paid = Number(b.paid_cents || 0) > 0;
+      const heldLine = paid
+        ? 'Your deposit is paid and this time is now held for you.\n'
+        : 'This time is now held for you.\n';
       const restLine = bal
-        ? 'Your deposit is paid and this time is now held for you.\n' +
+        ? heldLine +
           'Balance still due: ' + money(bal) + '. Bring it to your appointment, ' +
           'or sign in any time and pay it online before you come.\n\n'
-        : 'Your deposit is paid and this time is now held for you.\n' +
+        : heldLine +
           'Ebony will settle the rest with you at your appointment.\n\n';
       return {
         email: {

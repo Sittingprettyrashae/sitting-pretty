@@ -16,6 +16,8 @@ import {
 } from "../_shared/hours.ts";
 import { HttpError, json, readJson, readJsonOptional } from "../_shared/http.ts";
 import { balanceCentsFor, paidCents, withMoney, withMoneyAll } from "../_shared/money.ts";
+import { getService } from "../_shared/catalog.ts";
+import { availabilityFor } from "./bookings.ts";
 import {
   notifyBookingCanceled,
   notifyBookingConfirmed,
@@ -70,6 +72,9 @@ export async function handleAdmin(req: Request, path: string): Promise<Response>
   }
   if (req.method === "GET" && path === "/admin/slot-alerts") {
     return await listSlotAlerts();
+  }
+  if (req.method === "POST" && path === "/admin/bookings") {
+    return await adminCreateBooking(req);
   }
   const leadDeleteMatch = path.match(/^\/admin\/leads\/([^/]+)$/);
   if (req.method === "DELETE" && leadDeleteMatch) {
@@ -428,6 +433,151 @@ async function setServiceActive(req: Request, serviceId: string): Promise<Respon
   if (res.error) throw new HttpError(500, "Could not update that style");
   if (!res.data) throw new HttpError(404, "That style is not on the menu");
   return json({ service: res.data });
+}
+
+// POST /admin/bookings { email, name?, phone?, service_id, date, time, notes? }
+// -> { booking }
+//
+// The walk-in and the phone call. Ebony puts an appointment on her own book,
+// so it skips the deposit gate entirely (she settles money in the chair) and
+// lands as "confirmed". The email is required because a booking row requires
+// a client, and a client is an auth account: if the address has never been
+// seen, an account is created for it -- which also means this person can
+// later sign in with that email and find their appointment waiting.
+// Even an admin session should not be able to mint auth accounts at machine
+// speed: a stolen token could otherwise mail arbitrary addresses via
+// confirmations. In-isolate, resets on cold start -- a hand cannot hit it.
+let abWindowStart = 0;
+let abCount = 0;
+async function adminCreateBooking(req: Request): Promise<Response> {
+  const now = Date.now();
+  if (now - abWindowStart > 60_000) { abWindowStart = now; abCount = 0; }
+  if (++abCount > 10) {
+    throw new HttpError(429, "That is a lot of bookings at once. Give it a minute.");
+  }
+  const body = await readJson(req);
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase().slice(0, 254) : "";
+  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim().slice(0, 40) : "";
+  const serviceId = String(body.service_id ?? "");
+  const date = String(body.date ?? "");
+  const time = String(body.time ?? "");
+  const notes = typeof body.notes === "string" ? body.notes.slice(0, 1000) : "";
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    throw new HttpError(400, "Enter the client's email address.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "date must be YYYY-MM-DD");
+  if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) throw new HttpError(400, "time must be HH:MM");
+  const service = await getService(serviceId);
+  if (!service) throw new HttpError(400, "Pick a style from your menu.");
+
+  // Same re-check the client flow does (bookings.ts), and the demo mirrors:
+  // without it a stale modal books a day she just blocked, a past date, an
+  // off-grid 10:17, or an hour she just closed -- the DB constraint only
+  // stops literal overlaps. Checked BEFORE the client lookup so no auth
+  // account is ever created for a doomed request.
+  const avail = await availabilityFor(serviceId, date);
+  if (avail.closed) throw new HttpError(409, "You are closed that day.");
+  if (avail.blocked) throw new HttpError(409, "You blocked that day.");
+  if (!avail.slots.includes(time)) {
+    throw new HttpError(409, "That time is already taken. Pick another slot.");
+  }
+
+  const db = adminDb();
+
+  // Find or create the client. createUser both makes the auth account and,
+  // via the auth trigger, the clients row; an address that already has an
+  // account is simply looked up. email_confirm: they did not sign up -- SHE
+  // vouched for the address in person, which is the same trust the code
+  // sign-in extends.
+  let clientRow = null as { id: string; email: string; name: string | null; phone: string | null } | null;
+  // Set only when THIS request created the account, so a failed insert can
+  // take the account back out instead of leaving an orphan that answers
+  // "already has an account" forever after.
+  let createdUserId: string | null = null;
+  const found = await db.from("clients").select("id, email, name, phone").eq("email", email).maybeSingle();
+  if (found.error) throw new HttpError(500, "Could not look up that client");
+  if (found.data) {
+    clientRow = found.data;
+  } else {
+    const created = await db.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: { name: name || null, phone: phone || null },
+    });
+    if (created.error || !created.data?.user) {
+      // Two adds racing on the same fresh email: the loser sees email_exists.
+      // The account is there either way, so read it instead of failing her.
+      const raced = await db.from("clients").select("id, email, name, phone").eq("email", email).maybeSingle();
+      if (raced.data) {
+        clientRow = raced.data;
+      } else {
+        console.error("admin createUser failed:", created.error?.message);
+        throw new HttpError(500, "Could not set that client up. Check the email and try again.");
+      }
+    }
+    if (!clientRow && created.data?.user) {
+    // The trigger normally builds the clients row; poll once, then build it
+    // through the same function the trigger uses if the request beat it.
+    const again = await db.from("clients").select("id, email, name, phone").eq("id", created.data.user.id).maybeSingle();
+    clientRow = again.data ?? null;
+    if (!clientRow) {
+      const synced = await db.rpc("sp_sync_client", { uid: created.data.user.id });
+      const row = Array.isArray(synced.data) ? synced.data[0] : synced.data;
+      if (row && (row as { id?: string }).id) {
+        clientRow = row as { id: string; email: string; name: string | null; phone: string | null };
+      }
+    }
+    if (!clientRow) throw new HttpError(500, "Could not set that client up. Try again in a second.");
+    createdUserId = created.data.user.id;
+    }
+  }
+
+  if (!clientRow) throw new HttpError(500, "Could not set that client up. Try again in a second.");
+
+  // Fill blanks she gave us, never overwrite what the client set themselves.
+  const patch: Record<string, string> = {};
+  if (name && !clientRow.name) patch.name = name;
+  if (phone && !clientRow.phone) patch.phone = phone;
+  if (Object.keys(patch).length) {
+    await db.from("clients").update(patch).eq("id", clientRow.id);
+  }
+
+  const insert = await db
+    .from("bookings")
+    .insert({
+      client_id: clientRow.id,
+      client_name: name || clientRow.name,
+      client_email: clientRow.email,
+      client_phone: phone || clientRow.phone,
+      service_id: service.service_id,
+      service_name: service.name,
+      price: service.price,
+      deposit_cents: service.deposit_cents,
+      date,
+      time,
+      duration_min: service.duration_min,
+      status: "confirmed",
+      notes,
+    })
+    .select("*")
+    .single();
+  if (insert.error) {
+    if (createdUserId) {
+      try { await db.auth.admin.deleteUser(createdUserId); } catch (_e) { /* best effort */ }
+    }
+    if ((insert.error as { code?: string }).code === "23P01") {
+      throw new HttpError(409, "That time is already taken. Pick another slot.");
+    }
+    console.error("admin booking insert failed:", insert.error.message);
+    throw new HttpError(500, "Could not create the booking");
+  }
+
+  // The client hears the same confirmation a paid deposit sends; money is
+  // whatever she and the client settled in person.
+  await notifyBookingConfirmed(insert.data);
+  return json({ booking: withMoney(insert.data) });
 }
 
 // GET /admin/slot-alerts -> { days: [{day, count}] }
