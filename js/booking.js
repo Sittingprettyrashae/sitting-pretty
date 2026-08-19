@@ -1338,6 +1338,135 @@
     document.getElementById("services").scrollIntoView({ behavior: "smooth" });
   }
 
+  // ---------- booking widget (desktop, #signature aside) ----------
+  // The sheet's first three steps on the page itself. Every choice here is a
+  // head start, not a second flow: "Book your seat" opens the SAME sheet with
+  // service, day, and time already picked, landing on the account step.
+  function initWidget() {
+    const svcSel = $("#bwService");
+    if (!svcSel || !catalog) return;
+    // Static hosting has no availability API: every other surface swaps to
+    // text-to-book, so a live-looking widget would be the one dead end on
+    // the page. Hide it and let the cards' sms fallback own the flow.
+    if (offline) { const w = svcSel.closest(".book-widget"); if (w) w.remove(); return; }
+    const days = $("#bwDays"), times = $("#bwTimes"), note = $("#bwNote"),
+      msg = $("#bwMsg"), go = $("#bwGo"), more = $("#bwMore");
+    let wSvc = null, wDate = null, wTime = null, wSeq = 0;
+
+    svcSel.innerHTML = '<option value="">Select a service</option>' + catalog.map(g =>
+      `<optgroup label="${esc(g.cat)}">` + g.items.map(i =>
+        `<option value="${esc(i.service_id)}">${esc(i.name)} · ${esc(i.price)}</option>`).join("") + "</optgroup>").join("");
+
+    // The first four open days; "More days & times" opens the sheet's full
+    // fourteen. Hours can land AFTER the visitor has already picked a day,
+    // and the repaint must not eat that choice: re-mark the chip if it
+    // survived, and reset honestly if her hours closed it.
+    function paintDays() {
+      const base = chicagoToday();
+      let html = "", shown = 0;
+      for (let i = 0; i < 14 && shown < 4; i++) {
+        const d = new Date(base + i * 86400000);
+        const wd = hoursDays ? hoursDays[d.getUTCDay()] : null;
+        if (wd && wd.closed) continue;
+        const iso = d.toISOString().slice(0, 10);
+        html += `<button type="button" class="bw-chip" aria-pressed="false" data-d="${iso}">
+          <span class="d">${d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}</span>${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCDate()}</button>`;
+        shown++;
+      }
+      days.innerHTML = html;
+      if (!wDate) return;
+      const keep = days.querySelector(`[data-d="${wDate}"]`);
+      if (keep) {
+        keep.classList.add("sel");
+        keep.setAttribute("aria-pressed", "true");
+      } else {
+        wDate = null; wTime = null; times.innerHTML = "";
+        msg.textContent = "That day is not bookable after all. Pick another.";
+        ready();
+      }
+    }
+    paintDays();
+    if (!hoursDays) { const hp = loadHours(); if (hp && hp.then) hp.then(paintDays); }
+
+    function depositLine(svc) {
+      if (!svc) return "Your deposit holds your seat; it comes off your balance the day of your service.";
+      if (svc.deposit_cents) {
+        return `A $${Math.round(svc.deposit_cents / 100)} deposit holds your seat; it comes off your balance the day of your service.`;
+      }
+      return "This style is priced by your hair, so Ebony texts you to confirm the deposit before your time is held.";
+    }
+
+    function ready() { go.disabled = !(wSvc && wDate && wTime); }
+
+    async function loadTimes() {
+      wTime = null; ready();
+      if (!wSvc || !wDate) {
+        times.innerHTML = "";
+        msg.textContent = wSvc ? "Now pick a day." : "Pick a style to see real openings.";
+        return;
+      }
+      const seq = ++wSeq;
+      times.innerHTML = "";
+      msg.textContent = "Checking Ebony's book...";
+      try {
+        const av = await SP.request(`/api/availability?service_id=${encodeURIComponent(wSvc.service_id)}&date=${wDate}`);
+        if (seq !== wSeq) return;
+        if (av.closed || av.blocked || !av.slots.length) {
+          msg.textContent = av.closed ? "Closed that day. Try another." : av.blocked ? "Ebony is out that day." : "No openings left that day. Try another.";
+          return;
+        }
+        const shown = av.slots.slice(0, 6);
+        msg.textContent = shown.length + (shown.length === 1 ? " opening. " : " openings. ") + "Pick your time.";
+        times.innerHTML = shown.map(t =>
+          `<button type="button" class="bw-chip" aria-pressed="false" data-t="${t}">${fmtTime(t)}</button>`).join("");
+      } catch (e) {
+        if (seq === wSeq) msg.textContent = "Could not load times. Tap Book Now instead.";
+      }
+    }
+
+    svcSel.addEventListener("change", () => {
+      wSvc = svcSel.value ? findService(svcSel.value) : null;
+      note.textContent = depositLine(wSvc);
+      // "More days & times" is useful the moment a style exists: the four
+      // chips here end this week, and big styles get booked a week or two
+      // out. It opens the sheet's full fourteen-day strip.
+      more.hidden = !wSvc;
+      loadTimes();
+    });
+    days.addEventListener("click", e => {
+      const c = e.target.closest(".bw-chip"); if (!c) return;
+      days.querySelectorAll(".sel").forEach(x => { x.classList.remove("sel"); x.setAttribute("aria-pressed", "false"); });
+      c.classList.add("sel"); c.setAttribute("aria-pressed", "true");
+      wDate = c.getAttribute("data-d");
+      if (!wSvc) { msg.textContent = "Pick a style to see real openings."; return; }
+      loadTimes();
+    });
+    times.addEventListener("click", e => {
+      const c = e.target.closest(".bw-chip"); if (!c) return;
+      times.querySelectorAll(".sel").forEach(x => { x.classList.remove("sel"); x.setAttribute("aria-pressed", "false"); });
+      c.classList.add("sel"); c.setAttribute("aria-pressed", "true");
+      wTime = c.getAttribute("data-t"); ready();
+      msg.textContent = fmtTime(wTime) + " it is. Book your seat below.";
+    });
+    // "More times" and the CTA both drop into the real sheet with whatever
+    // is already chosen; the sheet re-verifies everything server-side.
+    more.addEventListener("click", () => {
+      S.mode = "book"; S.service = wSvc; S.date = wDate; S.time = null; S.notes = "";
+      resetAuthUi(); S.idx = 0; setSteps();
+      S.idx = S.steps.indexOf("when");
+      openSheet(); render();
+    });
+    go.addEventListener("click", () => {
+      if (!(wSvc && wDate && wTime)) return;
+      S.mode = "book"; S.service = wSvc; S.date = wDate; S.time = wTime; S.notes = "";
+      resetAuthUi(); S.idx = 0; setSteps();
+      openSheet();
+      if (me && me.client) { afterAuth(); return; }
+      S.idx = S.steps.indexOf("who");
+      render();
+    });
+  }
+
   // ---------- boot ----------
   async function boot() {
     // Her hours first and unawaited: the table on the page and the day strip
@@ -1347,6 +1476,7 @@
     buildAccordion();
     paintSignaturePrices();
     wireNav();
+    initWidget();
     // demo ribbon
     try { await SP.request("/api/_outbox"); demoMode = true; $("#demoRibbon").style.display = "block"; } catch (e) {}
     if (offline) { const b = $("#navMyBookings"); if (b) b.style.display = "none"; }
