@@ -13,10 +13,18 @@ window.SP_CONFIG = {
   // is everything before that. Set to "" to run against the local demo server.
   apiBase: "https://zfffguimcawjxtbiesqn.supabase.co/functions/v1",
   supabaseUrl: "https://zfffguimcawjxtbiesqn.supabase.co",
-  // Flip to true only AFTER a Google OAuth client is set up in her Google
-  // Cloud project and pasted into Supabase (Authentication > Providers >
-  // Google). Until then the "Continue with Google" button is hidden, because a
-  // disabled provider sends the visitor to a raw Supabase JSON error page.
+  // Google sign-in. Both of these are set for you by
+  // scripts/finish-google-oauth.sh once her OAuth client exists; until then the
+  // button stays hidden, because an unconfigured provider sends the visitor to
+  // a raw Supabase JSON error page.
+  //
+  // googleClientId is the web client id from HER Google Cloud project. It is a
+  // public value by design (it ships in every page that offers Google sign-in)
+  // -- the client SECRET is not here and never should be. With it set, the site
+  // uses Google Identity Services: the prompt is bound to this domain and says
+  // sittingprettyrashae.com instead of the Supabase project URL, and sign-in
+  // happens without leaving the page. See js/api.js "Google, the One Tap way".
   googleEnabled: false,
+  googleClientId: "",
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZmZndWltY2F3anh0Ymllc3FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyOTU5MjAsImV4cCI6MjEwMTg3MTkyMH0.qzQ-KXDVstfmGB0VlxydkRrvN0CAz-K4AzwqbVopJPk",
 };

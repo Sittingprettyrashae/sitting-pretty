@@ -535,12 +535,20 @@
     // Google only appears once it is configured on her Supabase project. A
     // disabled provider would bounce the client to a raw JSON error page, so
     // until the config flag flips, this is email and code only.
-    const googleReady = !!(window.SP_CONFIG && window.SP_CONFIG.googleEnabled);
-    const gbtn = googleReady
+    //
+    // Live, this is Google's own One Tap button rendered into gslot: it opens a
+    // small Google window over the sheet, so a client who is halfway through
+    // picking a style never loses her place. The demo has no client id and
+    // falls back to the old full-page trip, which is why stashPending is still
+    // there on that path.
+    const googleReady = SP.google.configured();
+    const inPage = googleReady && SP.google.inPage();
+    const gslot = inPage ? el(`<div class="gslot" aria-busy="true"></div>`) : null;
+    const gbtn = (googleReady && !inPage)
       ? el(`<button type="button" class="btn btn-ghost btn-google">${GOOGLE_MARK}<span>Continue with Google</span></button>`)
       : null;
-    if (gbtn) {
-      body.appendChild(gbtn);
+    if (gslot || gbtn) {
+      body.appendChild(gslot || gbtn);
       body.appendChild(el(`<div class="or-line"><span>or</span></div>`));
     }
 
@@ -580,6 +588,36 @@
     });
 
     if (gbtn) gbtn.addEventListener("click", () => { stashPending(); SP.loginWithGoogle(); });
+
+    // Google's script is fetched on demand, so the slot fills a moment after
+    // the step paints. If it never arrives (blocked script, no network), drop
+    // the slot and its divider rather than leaving a dead gap above the form:
+    // email and code still work, and the client should not have to wonder.
+    if (gslot) {
+      const seq = opSeq;
+      SP.google.mount(gslot, {
+        onSuccess: async () => {
+          if (stale(seq)) return;
+          msg(foot, "Signing you in...");
+          try {
+            const fresh = await SP.me();
+            if (stale(seq)) return;
+            me = fresh; S.offerPassword = false;
+            afterAuth();
+          } catch (e) {
+            if (stale(seq)) return;
+            msg(foot, e.message, true);
+          }
+        },
+        onError: (e) => { if (!stale(seq)) msg(foot, e.message, true); },
+      }).then(() => {
+        gslot.removeAttribute("aria-busy");
+      }).catch(() => {
+        const line = gslot.nextElementSibling;
+        if (line && line.classList.contains("or-line")) line.remove();
+        gslot.remove();
+      });
+    }
 
     links.addEventListener("click", e => {
       const a = e.target.closest("[data-alt]");

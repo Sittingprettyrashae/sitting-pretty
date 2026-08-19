@@ -76,6 +76,13 @@ main{max-width:680px;margin:0 auto;padding:0 1rem 6rem}
 .login-hint code{font-family:ui-monospace,monospace;font-size:.8rem;background:var(--surface-2);padding:.1rem .35rem;border-radius:.35rem}
 .login-note{color:var(--ink-dim);font-size:.9rem;line-height:1.5;margin-bottom:.2rem}
 .btn-google{width:100%;justify-content:center}
+/* Google renders its own button in here. It sizes itself in pixels and refuses
+   percentages, so js/api.js measures this slot and passes the width; the fixed
+   min-height reserves the space while Google's script is still on its way, or
+   the form under it jumps the moment it lands. */
+.gslot{display:flex;justify-content:center;min-height:44px;margin-bottom:.15rem}
+.gslot[aria-busy="true"]{opacity:0}
+.gslot > div{max-width:100%}
 .or-line{display:flex;align-items:center;gap:.75rem;margin:.95rem 0;color:var(--ink-faint);font-size:.8rem}
 .or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}
 .pw-wrap{position:relative;display:flex}
@@ -563,7 +570,11 @@ button.cal-day:hover{border-color:var(--rose)}
       <p class="login-sub" id="login-sub">You stay signed in on this phone, so this is a one-time step.</p>
 
       <div id="pane-password">
-        <button id="google-btn" class="btn btn-ghost btn-google" type="button">
+        <!-- Live, Google's own One Tap button renders into #google-slot and the
+             fallback button below stays hidden. The demo has no client id, so
+             it uses the button and the old redirect. js/dashboard.js decides. -->
+        <div id="google-slot" class="gslot" hidden></div>
+        <button id="google-btn" class="btn btn-ghost btn-google" type="button" hidden>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7.2" stroke="currentColor" stroke-width="1.6"/><path d="M12.4 9a3.4 3.4 0 1 1-1-2.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.4 9H9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span>Continue with Google</span>
         </button>

@@ -487,6 +487,13 @@ dialog[open] .sheet{transform:translateY(0)}
 /* account step */
 .btn-google{width:100%;justify-content:center}
 .btn-google .gmark{flex-shrink:0}
+/* Google renders its own button in here. It sizes itself in pixels and refuses
+   percentages, so js/api.js measures this slot and passes the width; the fixed
+   min-height reserves the space while Google's script is still on its way, or
+   the form under it jumps the moment it lands. */
+.gslot{display:flex;justify-content:center;min-height:44px;margin-bottom:.15rem}
+.gslot[aria-busy="true"]{opacity:0}
+.gslot > div{max-width:100%}
 .or-line{display:flex;align-items:center;gap:.75rem;margin:.95rem 0;color:var(--ink-faint);font-size:.8rem}
 .or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}
 .seg{display:flex;gap:.25rem;background:var(--surface-2);border-radius:var(--r-pill);padding:.25rem;margin-bottom:1rem}

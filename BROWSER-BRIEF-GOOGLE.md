@@ -32,7 +32,8 @@ users see when they sign in, and set:
 
 - **User type / Audience: External** (so her actual clients can sign in, not
   just test accounts).
-- **App name:** Sitting Pretty
+- **App name:** Sitting Pretty Rashae's  (this name is shown on the sign-in
+  prompt her clients see, so it should read like her business, not a project)
 - **User support email:** keeboniehill@gmail.com
 - **Developer contact email:** keeboniehill@gmail.com
 - Leave logo, app domain, and everything optional blank.
@@ -54,8 +55,9 @@ Add these EXACTLY (copy-paste, do not retype):
 
 **Authorized JavaScript origins:**
 ```
-https://taylormadecreative.github.io
-https://zfffguimcawjxtbiesqn.supabase.co
+https://sittingprettyrashae.com
+https://www.sittingprettyrashae.com
+https://sittingprettyrashae.github.io
 ```
 
 **Authorized redirect URIs:**
@@ -63,9 +65,17 @@ https://zfffguimcawjxtbiesqn.supabase.co
 https://zfffguimcawjxtbiesqn.supabase.co/auth/v1/callback
 ```
 
-The redirect URI is the one thing that breaks sign-in if it is off by a single
-character. Double-check it matches exactly, including `https://`, no trailing
-slash, and `/auth/v1/callback` at the end.
+The JavaScript origins are the important half here. Her site signs people in
+with Google Identity Services, which hands the token straight to the page, and
+Google only does that for an origin on this list. It is also what makes the
+sign-in prompt say **sittingprettyrashae.com** rather than the Supabase project
+URL, which is the whole reason we do it this way. Both the bare domain and the
+`www` form need to be listed, with no trailing slash on either.
+
+The redirect URI is not used by the live site, but Supabase still wants it on
+file, and it breaks things if it is off by a single character. Double-check it
+matches exactly, including `https://`, no trailing slash, and `/auth/v1/callback`
+at the end.
 
 Click **Create**.
 
@@ -77,6 +87,7 @@ your reply, clearly labelled. Also report:
 - the project name
 - the publishing status (Production or Testing)
 - confirmation that the redirect URI was accepted without an error
+- the exact list of Authorized JavaScript origins as saved
 
 ## Rules
 
@@ -87,3 +98,22 @@ your reply, clearly labelled. Also report:
   do not paste it into any other site or form.
 - If a screen looks different from these steps (Google moves this UI often),
   describe what you see and ask rather than guessing.
+
+## After this: what the developer runs
+
+With the two values in hand:
+
+```
+scripts/finish-google-oauth.sh "<client_id>" "<client_secret>"
+```
+
+That puts the id and secret on her Supabase project, writes `googleEnabled` and
+`googleClientId` into `js/config.js`, and leaves the change staged for commit.
+Only the client id goes in `js/config.js`; it is public by design. The client
+secret goes to Supabase and nowhere else, and never into the repo.
+
+Then commit and push `js/config.js`, wait for the Pages deploy, and open
+https://sittingprettyrashae.com on a phone: tap Book, get to the account step,
+and check that the Google prompt names **sittingprettyrashae.com**. If it still
+shows the Supabase URL, the site fell back to the redirect flow -- check that
+`googleClientId` actually made it into the deployed `js/config.js`.

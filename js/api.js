@@ -4,7 +4,8 @@
 //
 // Three ways in, all landing on {token, client} (see API.md "Auth"):
 //   password  -> SP.signup / SP.login
-//   Google    -> SP.loginWithGoogle() (round trip, returns with #sp_token=...)
+//   Google    -> SP.google.mount(el) (One Tap, in page, live site)
+//                SP.loginWithGoogle() (redirect round trip, demo only)
 //   email code-> SP.requestCode / SP.verify  (fallback + password reset)
 // The token lives in localStorage under "sp_token" and sessions are long lived,
 // so a returning client stays signed in and never needs a code for booking.
@@ -256,6 +257,155 @@ window.SP = (() => {
     logout: async () => { try { await sbFetch("/logout", {}); } catch (e) {} },
   };
 
+  // ---------------------------------------------------------------------
+  // Google, the One Tap way (js/config.js googleClientId).
+  //
+  // The redirect flow below still exists for the local demo, but her live site
+  // does not use it. Sending a client to accounts.google.com and back through
+  // zfffguimcawjxtbiesqn.supabase.co means the Google prompt says
+  // "zfffguimcawjxtbiesqn.supabase.co" -- which reads like a phishing page to
+  // someone who came here for a hair appointment. Supabase's own fix for that
+  // is a custom auth domain, which needs the Pro plan plus a paid add-on.
+  //
+  // Google Identity Services avoids the whole trip: Google hands the ID token
+  // straight to this page, bound to the JavaScript origin, so the prompt names
+  // sittingprettyrashae.com and no Supabase URL is ever shown. Supabase trades
+  // that token for a normal session (grant_type=id_token), and everything
+  // downstream -- sp_sync_client, the ADMIN_EMAILS reconcile, bookings -- is
+  // identical to a password sign-in. It also never leaves the page, so a
+  // half-finished booking survives signing in.
+  // ---------------------------------------------------------------------
+  const googleClientId = () => (window.SP_CONFIG && window.SP_CONFIG.googleClientId) || "";
+  const googleFlagOn = () => !!(window.SP_CONFIG && window.SP_CONFIG.googleEnabled);
+  // On her live site Google means One Tap, and One Tap needs a client id. The
+  // demo has no client id and keeps the old redirect button.
+  const usesGsi = () => onSupabase && googleFlagOn() && !!googleClientId();
+
+  let gsiLoading = null;
+  function loadGsi() {
+    if (gsiLoading) return gsiLoading;
+    gsiLoading = new Promise((resolve, reject) => {
+      const ready = () => window.google && window.google.accounts && window.google.accounts.id;
+      if (ready()) return resolve(window.google.accounts.id);
+      const s = document.createElement("script");
+      s.src = "https://accounts.google.com/gsi/client";
+      s.async = true; s.defer = true;
+      s.onload = () => ready()
+        ? resolve(window.google.accounts.id)
+        : reject(new Error("Google sign-in could not start. Use your email instead."));
+      s.onerror = () => reject(new Error("Google sign-in could not load. Use your email instead."));
+      document.head.appendChild(s);
+    });
+    // A failed load must not poison every later attempt.
+    gsiLoading.catch(() => { gsiLoading = null; });
+    return gsiLoading;
+  }
+
+  // Supabase expects the provider to have hashed the nonce (SHA-256, hex), so
+  // Google gets the hash and Supabase gets the original. crypto.subtle only
+  // exists in a secure context; over plain http we skip the nonce rather than
+  // break sign-in, which is exactly what Supabase does when none is sent.
+  async function makeNonce() {
+    try {
+      if (!(window.crypto && crypto.subtle && crypto.getRandomValues)) return null;
+      const raw = btoa(String.fromCharCode.apply(null, Array.from(crypto.getRandomValues(new Uint8Array(32)))));
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+      const hashed = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+      return { raw, hashed };
+    } catch (e) { return null; }
+  }
+
+  // Google's callback is global and fires once per credential, so the most
+  // recently mounted button owns the next one. Only one is ever on screen.
+  let gsiPending = null;
+  function gsiCallback(response) {
+    const h = gsiPending;
+    if (!h) return;
+    if (!response || !response.credential) {
+      h.onError(new Error("Google sign-in did not complete. Try again, or use your email."));
+      return;
+    }
+    exchangeGoogleToken(response.credential, h.nonce).then(h.onSuccess, h.onError);
+  }
+
+  async function exchangeGoogleToken(credential, rawNonce) {
+    const body = { provider: "google", id_token: credential };
+    if (rawNonce) body.nonce = rawNonce;
+    const data = await sbFetch("/token?grant_type=id_token", body);
+    requireSession(data, "Google sign-in did not complete. Try again, or use your email.");
+    await bootstrapClient();
+    return data;
+  }
+
+  async function gsiInit(id) {
+    const nonce = await makeNonce();
+    id.initialize({
+      client_id: googleClientId(),
+      callback: gsiCallback,
+      nonce: nonce ? nonce.hashed : undefined,
+      ux_mode: "popup",
+      auto_select: false,
+      itp_support: true,
+      // Chrome is removing third-party cookies; without this the prompt stops
+      // appearing there. https://developers.google.com/identity/gsi/web/guides/fedcm-migration
+      use_fedcm_for_prompt: true,
+    });
+    return nonce ? nonce.raw : null;
+  }
+
+  // Render Google's own button into `container`. Theirs, not ours, on purpose:
+  // the credential only reaches us through it, and clients recognise it.
+  async function googleMount(container, opts) {
+    opts = opts || {};
+    if (!container || !usesGsi()) return false;
+    const id = await loadGsi();
+    const rawNonce = await gsiInit(id);
+    gsiPending = {
+      nonce: rawNonce,
+      onSuccess: opts.onSuccess || function () {},
+      onError: opts.onError || function () {},
+    };
+    container.innerHTML = "";
+    // Google takes a pixel width, capped at 400, and will not do percentages.
+    const w = Math.max(200, Math.min(400, Math.round(container.clientWidth || 320)));
+    id.renderButton(container, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      shape: "pill",
+      text: opts.text || "continue_with",
+      logo_alignment: "left",
+      width: w,
+    });
+    // renderButton fails quietly: a client id Google does not recognise leaves
+    // the slot empty rather than throwing, and an empty slot above an "or"
+    // divider looks like the page half-loaded. Treat drawing nothing as a
+    // failure so the caller can take the whole block away.
+    await new Promise((r) => setTimeout(r, 400));
+    if (!container.firstElementChild) {
+      throw new Error("Google sign-in is not available right now. Use your email instead.");
+    }
+    return true;
+  }
+
+  // The floating One Tap prompt. Deliberately NOT called anywhere yet: the
+  // home page already opens the waitlist modal about 700ms in, and two
+  // uninvited boxes on one page load is one too many. Wire it up if that
+  // popup ever goes away.
+  async function googleOneTap(opts) {
+    opts = opts || {};
+    if (!usesGsi() || getToken()) return false;
+    const id = await loadGsi();
+    const rawNonce = await gsiInit(id);
+    gsiPending = {
+      nonce: rawNonce,
+      onSuccess: opts.onSuccess || function () {},
+      onError: opts.onError || function () {},
+    };
+    id.prompt();
+    return true;
+  }
+
   return {
     request,
     PASSWORD_HINT,
@@ -264,6 +414,16 @@ window.SP = (() => {
     hasToken: () => !!getToken(),
     // True when this page load arrived back from the Google round trip.
     returnedFromRedirect: () => cameBackFromRedirect,
+
+    // Google sign-in. On her live site this is One Tap and never leaves the
+    // page; the demo keeps the old redirect. Callers ask which they are on
+    // rather than checking config themselves.
+    google: {
+      configured: () => googleFlagOn() && (!onSupabase || !!googleClientId()),
+      inPage: usesGsi,
+      mount: googleMount,
+      oneTap: googleOneTap,
+    },
 
     signup: (email, password, name, phone) => {
       const e = String(email || "").trim().toLowerCase();

@@ -9,20 +9,53 @@
   function $(id) { return document.getElementById(id); }
 
   // Google is only usable once it is configured on her Supabase project. Until
-  // then, hide the button and its divider so nobody taps into a JSON error.
-  (function hideGoogleUntilReady() {
-    var ready = window.SP_CONFIG && window.SP_CONFIG.googleEnabled;
-    document.addEventListener("DOMContentLoaded", function () {
-      var sub = $("login-sub");
-      if (ready) {
-        if (sub) sub.textContent = "Sign in with Google or your password. You stay signed in on this phone, so this is a one-time step.";
-        return;
-      }
-      var g = $("google-btn"); if (g) g.hidden = true;
-      var line = document.querySelector("#login-view .or-line"); if (line) line.hidden = true;
-      if (sub) sub.textContent = "Sign in with your email and password. You stay signed in on this phone, so this is a one-time step.";
+  // then, hide both buttons and the divider so nobody taps into a JSON error.
+  //
+  // Live, Google means One Tap: SP renders Google's own button into
+  // #google-slot and sign-in happens in a small window over this page, with a
+  // prompt that names sittingprettyrashae.com rather than the Supabase project
+  // URL. The demo has no client id, so it keeps #google-btn and the old
+  // full-page redirect. Everything below is markup wiring -- the sign-in
+  // handling itself is shared, in wire().
+  function hideGoogle() {
+    var slot = $("google-slot"); if (slot) slot.hidden = true;
+    var g = $("google-btn"); if (g) g.hidden = true;
+    var line = document.querySelector("#login-view .or-line"); if (line) line.hidden = true;
+    var sub = $("login-sub");
+    if (sub) sub.textContent = "Sign in with your email and password. You stay signed in on this phone, so this is a one-time step.";
+  }
+
+  // Called once the login card is actually on screen. Google sizes its button
+  // in pixels measured from the container, and a card that is still hidden
+  // measures zero, so mounting on DOMContentLoaded produced a stub-width button
+  // in a full-width card.
+  var googleMounted = false;
+  function mountGoogle() {
+    if (googleMounted) return;
+    if (!window.SP || !window.SP.google || !window.SP.google.configured()) return hideGoogle();
+    var sub = $("login-sub");
+    if (sub) sub.textContent = "Sign in with Google or your password. You stay signed in on this phone, so this is a one-time step.";
+    if (!window.SP.google.inPage()) { googleMounted = true; $("google-btn").hidden = false; return; }
+    var slot = $("google-slot");
+    if (!slot) return hideGoogle();
+    googleMounted = true;
+    slot.hidden = false;
+    window.SP.google.mount(slot, {
+      onSuccess: function () {
+        setLoginError("");
+        resolveClient(null).then(admitOrRefuse).catch(function (err) {
+          safeLogout();
+          showLogin(errMsg(err));
+        });
+      },
+      onError: function (err) { setLoginError(errMsg(err)); },
+    }).catch(function () {
+      // Google's script never arrived. Say nothing and show the email form: a
+      // dead button she taps twice is worse than no button at all.
+      googleMounted = false;
+      hideGoogle();
     });
-  })();
+  }
 
   // ---------------- state ----------------
   var state = {
@@ -234,7 +267,17 @@
     $("login-view").hidden = false;
     setLoginError(errText || "");
     showPane("password");
+    mountGoogle();
   }
+  // The demo's own /api/auth/* endpoints answer with {token, client}. Supabase
+  // Auth answers with a session and nothing else, so on her live site the
+  // client has to be fetched. Without this, every sign-in on the real site
+  // looked at an undefined client and refused her from her own dashboard.
+  function resolveClient(res) {
+    if (res && res.client) return Promise.resolve(res);
+    return api("/api/me");
+  }
+
   // Only the owner account gets in; anyone else is signed back out.
   function admitOrRefuse(res) {
     if (res && res.client && res.client.is_admin) {
@@ -1532,6 +1575,7 @@
       });
     });
 
+    // Demo only: the live site renders Google's own button into #google-slot.
     $("google-btn").addEventListener("click", function () {
       setLoginError("");
       window.SP.loginWithGoogle();
@@ -1566,7 +1610,7 @@
       var btn = $("password-submit");
       btn.disabled = true;
       setLoginError("");
-      window.SP.login(email, pw).then(function (res) {
+      window.SP.login(email, pw).then(resolveClient).then(function (res) {
         btn.disabled = false;
         state.loginEmail = email;
         admitOrRefuse(res);
@@ -1595,7 +1639,7 @@
       var btn = $("code-submit");
       btn.disabled = true;
       setLoginError("");
-      window.SP.verify(state.loginEmail, code).then(function (res) {
+      window.SP.verify(state.loginEmail, code).then(resolveClient).then(function (res) {
         btn.disabled = false;
         var client = res && res.client;
         if (!client || !client.is_admin) {

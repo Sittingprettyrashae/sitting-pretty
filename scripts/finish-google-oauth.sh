@@ -3,9 +3,16 @@
 #
 #   scripts/finish-google-oauth.sh "<client_id>" "<client_secret>"
 #
-# It configures her Supabase Google provider, verifies the change, and flips
-# the frontend googleEnabled flag so the button comes back on the dashboard and
-# the client booking sheet. Then commit and push js/config.js.
+# It configures her Supabase Google provider, verifies the change, and writes
+# both googleEnabled and googleClientId into js/config.js so the button comes
+# back on the dashboard and the client booking sheet. Then commit and push
+# js/config.js.
+#
+# The id must be the WEB client, and its Authorized JavaScript origins must
+# list https://sittingprettyrashae.com (plus http://localhost:<port> only while
+# developing). That origin is what makes Google name her domain on the prompt
+# instead of the Supabase project URL -- see js/api.js "Google, the One Tap
+# way". The live site never uses a redirect URI.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -33,12 +40,19 @@ if not d.get("external_google_enabled"):
     raise SystemExit("Google did not enable; check the client id/secret and try again.")
 PY
 
-echo "Flipping the frontend flag..."
-python3 - <<'PY'
+echo "Flipping the frontend flag and writing the client id..."
+CLIENT_ID="$CLIENT_ID" python3 - <<'PY'
+import os, re
+cid = os.environ["CLIENT_ID"]
 p = "js/config.js"; s = open(p).read()
 s = s.replace("  googleEnabled: false,", "  googleEnabled: true,")
+# The client id is public by design, and it is what puts HER domain rather
+# than the Supabase project URL on the Google prompt. The client SECRET went
+# to Supabase above and must never land in this file.
+s = re.sub(r'  googleClientId: "[^"]*",', '  googleClientId: "%s",' % cid, s)
 open(p, "w").write(s)
 print("  js/config.js googleEnabled ->", "true" if "googleEnabled: true," in s else "UNCHANGED")
+print("  js/config.js googleClientId ->", "set" if cid in s else "UNCHANGED")
 PY
 
 echo

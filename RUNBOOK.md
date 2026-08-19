@@ -270,15 +270,42 @@ permission screen, so it should say her business, not a developer's.
 3. Client Secret (for OAuth): paste the client secret from Google.
 4. Save. Nothing needs redeploying; the change is live immediately.
 
-Then confirm the allow-list from 2b.3 contains the page Google should return
-to, because the frontend passes it as `redirectTo`:
+**The live site does not use the redirect flow.** Everything above still has
+to be configured, because Supabase will not accept a Google token for a
+client id it does not know. But the browser never makes the trip to
+`accounts.google.com` and back through `<ref>.supabase.co`, because that trip
+puts `zfffguimcawjxtbiesqn.supabase.co` on the prompt her clients read, and a
+salon client who is asked to trust a string like that is right to hesitate.
+Supabase's own fix for this is a custom auth domain, which needs the Pro plan
+plus a paid add-on.
+
+Instead the site uses Google Identity Services. Google renders its own button,
+hands the ID token straight to the page, and the page trades it for a session:
 
 ```js
-supabase.auth.signInWithOAuth({
-  provider: "google",
-  options: { redirectTo: window.location.origin + window.location.pathname },
-});
+// js/api.js, "Google, the One Tap way"
+POST <supabaseUrl>/auth/v1/token?grant_type=id_token
+     { provider: "google", id_token: "<credential>", nonce: "<raw nonce>" }
 ```
+
+Consequences worth knowing:
+
+- **Authorized JavaScript origins**, not the redirect URI, are what make it
+  work. Her domain (bare and `www`) must be listed on the Google client.
+- The client id has to be in `js/config.js` as `googleClientId`, alongside
+  `googleEnabled: true`. Both are written by
+  `scripts/finish-google-oauth.sh`. The client id is public by design; the
+  client secret goes to Supabase only.
+- Nonce handling is per Supabase's contract: Google gets the SHA-256 hex of
+  the nonce, Supabase gets the original. Leave "Skip nonce check" OFF.
+- Sign-in no longer leaves the page, so a client halfway through choosing a
+  style keeps her place.
+- If `googleClientId` is empty, the code falls back to the old redirect flow.
+  That is what the local demo uses, and it is the thing to suspect if the
+  Supabase URL ever shows up on the prompt again.
+
+The redirect allow-list from 2b.3 still matters for confirmation and
+password-reset links, so leave it as it is.
 
 What happens on an account she already had: if a client used the email code
 before and now taps Sign in with Google with the same address, Supabase

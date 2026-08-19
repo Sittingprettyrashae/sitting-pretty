@@ -45,9 +45,17 @@ where `auth_provider` ∈ `password | google | code`.
     Over the limit returns 429 with a wait message.
 
 **Google**
-- `GET /api/auth/google/start?redirect=<path>` → 302 to Google's consent screen
-  (production). Demo mock: 302 to `/demo-google?redirect=…`, a clearly-labeled
-  fake account chooser so the flow is clickable without Google credentials.
+
+Production does NOT use these endpoints. The live site signs in with Google
+Identity Services: Google hands the ID token to the page and the browser trades
+it directly with Supabase for a session
+(`POST /auth/v1/token?grant_type=id_token`), so the prompt names her own domain
+instead of the Supabase project URL. See js/api.js, "Google, the One Tap way",
+and RUNBOOK 2b.4. The endpoints below are the DEMO server's redirect flow, kept
+so the mock is clickable without Google credentials.
+
+- `GET /api/auth/google/start?redirect=<path>` → 302 to `/demo-google?redirect=…`,
+  a clearly-labeled fake account chooser.
 - `GET /api/auth/google/callback?code=…&state=…` → validates state, exchanges the
   code, upserts the client by verified email, then 302s back to
   `<redirect>#sp_token=<token>` for the frontend to store.
