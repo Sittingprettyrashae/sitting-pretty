@@ -681,8 +681,11 @@ button.cal-day:hover{border-color:var(--rose)}
       <form id="menu-add" class="menu-add">
         <p class="field-label" style="margin-bottom:.4rem">Add a style</p>
         <div class="menu-add-grid">
-          <input id="ma-cat" class="field" list="menu-cats" placeholder="Category" autocomplete="off">
-          <datalist id="menu-cats"></datalist>
+          <!-- A real select, not a datalist: Safari filters datalist options
+               by the box's current value, so once a category was picked every
+               other one vanished from the dropdown and it read as locked. -->
+          <select id="ma-cat" class="field" aria-label="Category"></select>
+          <input id="ma-cat-new" class="field" placeholder="New category name" autocomplete="off" hidden>
           <input id="ma-name" class="field" placeholder="Style name" autocomplete="off">
           <input id="ma-price" class="field" placeholder="Price, like $75 or $50+" autocomplete="off">
           <input id="ma-dur" class="field" type="number" min="15" max="720" step="15" placeholder="Minutes it takes">

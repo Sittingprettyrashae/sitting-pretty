@@ -1027,10 +1027,17 @@
     $("menu-empty").hidden = state.services.length > 0;
     if (!state.services.length) { list.innerHTML = ""; return; }
 
-    // category datalist for the add form
+    // Category dropdown for the add form. Keep whatever she had chosen
+    // across re-renders, and end with a "New category" choice that reveals a
+    // free-text box, so adding a brand-new section is still one form.
     var cats = [];
     state.services.forEach(function (r) { if (cats.indexOf(r.cat) === -1) cats.push(r.cat); });
-    $("menu-cats").innerHTML = cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join("");
+    var sel = $("ma-cat");
+    var had = sel.value;
+    sel.innerHTML = cats.map(function (c) {
+      return '<option value="' + esc(c) + '">' + esc(c) + "</option>";
+    }).join("") + '<option value="__new__">+ New category…</option>';
+    if (had && (cats.indexOf(had) !== -1 || had === "__new__")) sel.value = had;
 
     var rowHtml = function (r) {
       var row = '<div class="menu-row' + (r.active ? '' : ' is-hidden') + '" data-svc="' + esc(r.service_id) + '">';
@@ -1117,8 +1124,11 @@
       el.textContent = text; el.hidden = !text;
     };
     var dep = $("ma-dep").value.trim();
+    var catSel = $("ma-cat").value;
+    var cat = catSel === "__new__" ? $("ma-cat-new").value.trim() : catSel.trim();
+    if (!cat) { say("Name the new category first."); return; }
     var body = {
-      cat: $("ma-cat").value.trim(),
+      cat: cat,
       name: $("ma-name").value.trim(),
       price: $("ma-price").value.trim(),
       duration_min: Number($("ma-dur").value),
@@ -1575,6 +1585,13 @@
   function wire() {
     // ---- login: password, Google, code fallback ----
     $("setpw-hint").textContent = window.SP.PASSWORD_HINT;
+
+    // "+ New category…" swaps in a text box; picking a real one hides it.
+    $("ma-cat").addEventListener("change", function () {
+      var fresh = this.value === "__new__";
+      $("ma-cat-new").hidden = !fresh;
+      if (fresh) $("ma-cat-new").focus();
+    });
 
     document.querySelectorAll(".pw-toggle").forEach(function (btn) {
       btn.addEventListener("click", function () {
