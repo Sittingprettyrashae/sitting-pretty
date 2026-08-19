@@ -469,6 +469,21 @@ Notes:
     or `set -a; . ./server/.env.local` dies with `unmatched '`.
   - The daily cap is the one to watch: a broadcast to more than 100 people in
     one day exceeds the free plan. Split it across days, or upgrade.
+
+- **Supabase Auth sends through Resend too (custom SMTP), DONE 2026-08-19.**
+  Authentication > Emails > SMTP: host `smtp.resend.com`, port 465, user
+  `resend`, password = the same sending-only Resend key, sender
+  `hello@send.sittingprettyrashae.com`, name "Sitting Pretty Rashae's".
+  Setting custom SMTP is what LIFTS the free tier's template lock, so the
+  sign-in email finally carries a real code: `mailer_otp_length` is now 6 and
+  the magic-link template prints `{{ .Token }}` above a one-tap
+  `{{ .ConfirmationURL }}` link. Verified live: a requested code delivered as
+  "Your Sitting Pretty sign-in code" from her domain with a 6-digit code in
+  the body.
+  - Before this, her project sent Supabase's default "Your sign-in link" mail
+    from `noreply@mail.app.supabase.io` with NO code in it, while every screen
+    asked for a 6-digit code. If sign-in ever regresses to that, custom SMTP
+    got cleared.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically
   by the edge runtime. Do not set them and never put the service role key in
   any frontend file.

@@ -1987,13 +1987,8 @@
       state.codePurpose = purpose;
       window.SP.requestCode(email, purpose).then(function () {
         showPane("code");
-        // Live, the free-tier email carries a sign-in LINK (the code cannot be
-        // shown in it until custom SMTP exists); the demo emails a real code.
-        // Say what actually arrives.
-        var onLive = !!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl);
-        $("code-sent-line").textContent = note || (onLive
-          ? "Check " + email + " and tap the sign-in link inside. It brings you right back here."
-          : "We sent a 6-digit code to " + email + ".");
+        $("code-sent-line").textContent = note ||
+          ("We sent a 6-digit code to " + email + ". The email has a one-tap link too.");
         $("login-code").value = "";
         $("login-code").focus();
         refreshOutbox();
@@ -2026,9 +2021,8 @@
     });
 
     $("forgot-btn").addEventListener("click", function () {
-      sendCode($("login-email").value.trim(), "reset", (!!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl))
-        ? "Check your email and tap the sign-in link. Once you are back here, you can set a new password."
-        : "We emailed you a 6-digit code. Enter it and you can set a new password.");
+      sendCode($("login-email").value.trim(), "reset",
+        "We emailed you a 6-digit code. Enter it and you can set a new password.");
     });
 
     $("code-instead-btn").addEventListener("click", function () {

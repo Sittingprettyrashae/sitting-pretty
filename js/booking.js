@@ -736,9 +736,7 @@
       S.codePurpose = forgot ? "reset" : "login";
       S.codeNote = forgot
         ? "No problem. We will email you a code, then you can set a new password."
-        : (!!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl))
-          ? "We will email you a sign-in link. One tap and you are back here, signed in."
-          : "We will email you a 6-digit code. No password needed.";
+        : "We will email you a 6-digit code. No password needed.";
       startCode(email, foot);
     });
 
@@ -843,9 +841,7 @@
   }
 
   function rWhoCode(body, foot) {
-    body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || ((!!(window.SP_CONFIG && window.SP_CONFIG.supabaseUrl))
-      ? "Check your email and tap the sign-in link inside."
-      : "We will email you a 6-digit code."))}</p>`));
+    body.appendChild(el(`<p class="lead-note">${esc(S.codeNote || "We will email you a 6-digit code.")}</p>`));
     body.appendChild(el(`<div class="field"><label for="bkEmail">Email</label><input id="bkEmail" type="email" name="username" autocomplete="username" value="${esc(S.email)}"></div>`));
     body.appendChild(el(`<div class="field"><label for="bkCode">Sign-in code</label><input id="bkCode" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="123456"></div>`));
     const links = el(`<p class="alt-links">
