@@ -31,6 +31,12 @@
 <link rel="stylesheet" href="css/tokens.css">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+/* The hidden attribute must always win. Without this, any element whose
+   class sets a display (the account menu's display:flex) ignores hidden and
+   paints permanently -- which is exactly how the My bookings / Log out menu
+   got stuck open under the nav. dashboard.html has carried this line all
+   along; index.html never did. */
+[hidden]{display:none !important}
 html{scroll-behavior:smooth}
 body{
   font-family:var(--font-body);background:var(--bg);color:var(--ink);

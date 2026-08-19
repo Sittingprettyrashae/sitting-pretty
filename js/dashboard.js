@@ -57,6 +57,9 @@
     });
   }
 
+  // True only on the page load that arrived from the sign-in email.
+  var freshFromEmailLink = !!(window.SP && window.SP.returnedFromRedirect && window.SP.returnedFromRedirect());
+
   // ---------------- state ----------------
   var state = {
     client: null,
@@ -284,6 +287,21 @@
   function admitOrRefuse(res) {
     if (res && res.client && res.client.is_admin) {
       state.client = res.client;
+      // A magic-link arrival never passed through the code pane, so nobody
+      // ever offered a password -- and without one, every future sign-in
+      // costs another email. Invite (never require) exactly once, on the
+      // arrival itself; "Not now" goes straight in.
+      if (freshFromEmailLink && !res.client.has_password) {
+        freshFromEmailLink = false;
+        $("splash").hidden = true;
+        $("app-view").hidden = true;
+        $("login-view").hidden = false;
+        setLoginError("");
+        $("new-password").value = "";
+        showPane("setpw");
+        $("new-password").focus();
+        return true;
+      }
       enterApp();
       return true;
     }
