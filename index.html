@@ -103,6 +103,8 @@ nav .acct-menu{
 nav .acct-menu button{width:100%;text-align:left;border-radius:.6rem}
 @media (max-width:680px){
   nav .links a[href="#work"], nav .links a[href="#about"], nav .links a[href="#reviews"]{display:none}
+  /* signed out on a phone: "Log in" covers it; the same sheet lists bookings */
+  nav .links #navMyBookings{display:none}
   nav{gap:.25rem}
   nav .acct > button{max-width:7rem}
 }
@@ -765,6 +767,7 @@ dialog[open] .sheet{transform:translateY(0)}
     <a href="#reviews">Reviews</a>
     <a href="#about">Meet Ebony</a>
     <button type="button" id="navMyBookings">My bookings</button>
+    <button type="button" id="navLogin" hidden>Log in</button>
     <div class="acct" id="navAccountWrap" hidden>
       <button type="button" id="navAccount" aria-expanded="false" aria-haspopup="true" aria-controls="navAccountMenu">
         <span class="acct-dot" aria-hidden="true"></span><span id="navAccountName">Account</span>

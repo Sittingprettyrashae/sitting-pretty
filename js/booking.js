@@ -1264,14 +1264,17 @@
   function syncNav() {
     const wrap = $("#navAccountWrap"); const plain = $("#navMyBookings");
     if (!wrap || !plain) return;
+    const login = $("#navLogin");
     const c = me && me.client;
     if (c && !offline) {
       $("#navAccountName").textContent = firstName(c);
       $("#navAccount").setAttribute("aria-label", "Account menu for " + firstName(c));
       wrap.hidden = false; plain.hidden = true;
+      if (login) login.hidden = true;
     } else {
       closeAcctMenu();
       wrap.hidden = true; plain.hidden = false;
+      if (login) login.hidden = offline;
     }
   }
   function wireNav() {
@@ -1490,6 +1493,8 @@
     if (offline) { const b = $("#navMyBookings"); if (b) b.style.display = "none"; }
     document.querySelectorAll("[data-book]").forEach(b => b.addEventListener("click", () => openBooking(null)));
     $("#navMyBookings").addEventListener("click", openMyBookings);
+    const navLogin = $("#navLogin");
+    if (navLogin) { navLogin.hidden = offline || !!(me && me.client); navLogin.addEventListener("click", openMyBookings); }
     document.querySelectorAll(".sig-card").forEach(card => {
       card.addEventListener("click", () => openCategory(card.getAttribute("data-cat")));
     });
