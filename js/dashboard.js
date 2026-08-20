@@ -1700,20 +1700,28 @@
     if (isHtml) mkPaintHtmlPreview();
   }
 
+  var mkPreviewTimer = null;
   function mkPaintHtmlPreview() {
-    var html = $("mk-html").value.trim();
-    var wrap = $("mk-preview-wrap");
-    var frame = $("mk-html-preview");
-    wrap.hidden = !html;
-    if (!html) return;
-    // srcdoc + an empty sandbox: her pasted design renders, its scripts do
-    // not run in her dashboard.
-    frame.srcdoc = html;
-    // Render at email width, scale to whatever the phone gives us.
-    var w = wrap.clientWidth || 600;
-    var scale = Math.min(1, w / 600);
-    frame.style.transform = "scale(" + scale + ")";
-    wrap.style.height = Math.round(420 * scale) + "px";
+    // Debounced: repainting srcdoc on every keystroke refetches the design's
+    // images and the preview flashes blank while they land.
+    clearTimeout(mkPreviewTimer);
+    mkPreviewTimer = setTimeout(function () {
+      var html = $("mk-html").value.trim();
+      var wrap = $("mk-preview-wrap");
+      var frame = $("mk-html-preview");
+      wrap.hidden = !html;
+      if (!html) return;
+      // srcdoc + an empty sandbox: her pasted design renders, its scripts do
+      // not run in her dashboard.
+      frame.srcdoc = html;
+      // Render at email width, scale to whatever the screen gives us, and
+      // shrink the wrap to the scaled size so no dead white sits beside it.
+      var w = Math.min(wrap.parentElement.clientWidth || 600, 600);
+      var scale = Math.min(1, w / 600);
+      frame.style.transform = "scale(" + scale + ")";
+      wrap.style.height = Math.round(420 * scale) + "px";
+      wrap.style.maxWidth = Math.round(600 * scale) + "px";
+    }, 350);
   }
 
   function sendBroadcast() {
