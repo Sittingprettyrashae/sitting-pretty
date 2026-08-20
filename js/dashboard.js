@@ -1656,12 +1656,28 @@
     var hits = mkSearchPool().filter(function (p) {
       return (p.name + " " + p.email + " " + p.phone).toLowerCase().indexOf(q) > -1;
     }).slice(0, 8);
-    if (!hits.length) {
-      box.innerHTML = '<li><button type="button" disabled style="cursor:default">Nobody matches that. Clients show up here once they book, and the popup on your site fills the waitlist for you.</button></li>';
+    // Not in her book yet? A full email can still be emailed, and a phone
+    // number can be texted from her own phone right now.
+    var extras = "";
+    var rawEmail = window.SP.emailLooksOk(q) ? q : null;
+    var rawDigits = q.replace(/[^+\d]/g, "");
+    var rawPhone = /^\+?\d{10,15}$/.test(rawDigits) ? rawDigits : null;
+    if (rawEmail && !hits.some(function (p) { return p.email.toLowerCase() === rawEmail; })) {
+      extras += '<li><button type="button" data-mk-raw-email="' + esc(rawEmail) + '">' +
+        '<span class="who">Email ' + esc(rawEmail) + '<span class="tag">new</span></span>' +
+        '<span class="sub">Not in your book yet. Sends to this address as typed.</span></button></li>';
+    }
+    if (rawPhone) {
+      extras += '<li><button type="button" data-mk-raw-sms="' + esc(rawPhone) + '">' +
+        '<span class="who">Text ' + esc(q) + '<span class="tag">opens Messages</span></span>' +
+        '<span class="sub">Opens your own texting app with this number.</span></button></li>';
+    }
+    if (!hits.length && !extras) {
+      box.innerHTML = '<li><button type="button" disabled style="cursor:default">Nobody matches that. Clients show up here once they book, and the popup on your site fills the waitlist for you. A full email or phone number works here too.</button></li>';
       box.hidden = false;
       return;
     }
-    box.innerHTML = hits.map(function (p, i) {
+    box.innerHTML = extras + hits.map(function (p, i) {
       return '<li><button type="button" data-mk-pick="' + i + '">' +
         '<span class="who">' + esc(p.name || p.email) +
         (p.kind === "lead" ? '<span class="tag">waitlist</span>' : "") + "</span>" +
@@ -1734,7 +1750,10 @@
     if (flyer) body.image = flyer.dataUrl;
     if (isHtml) body.html = $("mk-html").value.trim();
     if (!to && $("bc-include-leads").checked) body.include_leads = true;
-    if (to) body[to.kind === "lead" ? "lead_id" : "client_id"] = to.id;
+    if (to) {
+      if (to.kind === "email") body.email = to.email;
+      else body[to.kind === "lead" ? "lead_id" : "client_id"] = to.id;
+    }
     $("bc-send-yes").disabled = true;
     $("bc-send-no").disabled = true;
     $("bc-send-yes").textContent = "Sending";
@@ -2144,6 +2163,17 @@
     });
     $("mk-search").addEventListener("input", mkRunSearch);
     $("mk-results").addEventListener("click", function (e) {
+      var raw = e.target.closest("[data-mk-raw-email]");
+      if (raw) {
+        mkSetTo({ kind: "email", id: null, name: "", email: raw.getAttribute("data-mk-raw-email") });
+        $("mk-search").value = "";
+        return;
+      }
+      var sms = e.target.closest("[data-mk-raw-sms]");
+      if (sms) {
+        window.location.href = "sms:" + sms.getAttribute("data-mk-raw-sms");
+        return;
+      }
       var b = e.target.closest("[data-mk-pick]");
       if (!b) return;
       var hit = $("mk-results")._hits[Number(b.getAttribute("data-mk-pick"))];

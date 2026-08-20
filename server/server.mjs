@@ -2352,6 +2352,10 @@ async function handleApi(req, res, url) {
       const l = db.leads.find((x) => x.id === body.lead_id);
       if (l) to = { id: null, email: l.email, name: l.name, phone: l.phone };
     }
+    if (!to && typeof body.email === 'string') {
+      const email = cleanStr(body.email, 254).toLowerCase();
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) to = { id: null, email, name: null, phone: null };
+    }
     if (!to) throw new ApiError(404, 'Pick who this goes to first.');
     const imageUrl = hasImage ? saveFlyer(body.image) : null;
     notify('direct_message', { email: to.email, phone: to.phone, name: to.name },

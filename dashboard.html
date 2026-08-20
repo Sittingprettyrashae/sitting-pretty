@@ -186,15 +186,19 @@ body.in-app main{max-width:none;margin:0;padding:0}
 
 /* add booking modal */
 .ab-scrim{position:fixed;inset:0;z-index:80;background:oklch(20% 0.03 350 / .45);backdrop-filter:blur(3px)}
+/* Centered with inset+margin, never transform: the entrance animation's
+   final frame (rise ends at translateY(0), fill both) was REPLACING the
+   translate(-50%,-50%) and shoving the dialog off-center and off-screen. */
+@keyframes sheetin{from{opacity:0}to{opacity:1}}
 .ab-modal{
-  position:fixed;z-index:81;left:50%;transform:translateX(-50%);
-  bottom:0;width:100%;max-width:520px;max-height:88vh;overflow-y:auto;
+  position:fixed;z-index:81;inset:auto 0 0 0;margin:0 auto;
+  width:100%;max-width:520px;max-height:88vh;overflow-y:auto;
   background:var(--surface);border-radius:1.2rem 1.2rem 0 0;border:1px solid var(--line);
   padding:1.1rem 1.15rem calc(1.2rem + env(safe-area-inset-bottom));
-  animation:rise .22s var(--ease-out) both;
+  animation:sheetin .22s var(--ease-out) both;
 }
 @media (min-width:720px){
-  .ab-modal{bottom:auto;top:50%;transform:translate(-50%,-50%);border-radius:1.2rem}
+  .ab-modal{inset:0;margin:auto;height:fit-content;border-radius:1.2rem;width:min(520px, 94vw)}
 }
 .ab-modal h2{font-size:1.15rem;font-weight:900;margin-bottom:.2rem}
 .ab-sub{color:var(--ink-dim);font-size:.86rem;margin-bottom:.9rem}
@@ -757,7 +761,7 @@ button.cal-day:hover{border-color:var(--rose)}
 @media (prefers-reduced-motion: reduce){
   .view-in,.login-card,.day-panel,.confirm-box,.affected-box,.flyer-preview{animation:none}
   .drawer,.scrim,.toast,.hswitch-track,.hswitch-thumb{transition:none}
-  .ab-modal,.more-sheet{animation:none}
+  .ab-modal{animation:none}
   .ab-scrim{backdrop-filter:none}
   .btn:active,.tab:active,.pill:active,.suggest:active,.outbox-fab:active,
   .hswitch:active,.hcopy:active,.file-btn:active,

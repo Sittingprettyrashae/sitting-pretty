@@ -723,6 +723,14 @@ async function directMessage(req: Request): Promise<Response> {
     // Waitlist rows are not clients; client_id stays null in the log.
     if (res.data) to = { id: null, email: res.data.email, name: res.data.name, phone: res.data.phone ?? null };
   }
+  // A typed address she confirmed in the picker: not everyone she wants to
+  // reach has booked yet. Email only; there is no id to resolve.
+  if (!to && typeof body.email === "string") {
+    const email = body.email.trim().toLowerCase().slice(0, 254);
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      to = { id: null, email, name: null, phone: null };
+    }
+  }
   if (!to) throw new HttpError(404, "Pick who this goes to first.");
 
   const imageUrl = image ? await storeFlyer(image) : null;
