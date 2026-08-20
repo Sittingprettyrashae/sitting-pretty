@@ -24,7 +24,7 @@ window.SP_CONFIG = {
   // uses Google Identity Services: the prompt is bound to this domain and says
   // sittingprettyrashae.com instead of the Supabase project URL, and sign-in
   // happens without leaving the page. See js/api.js "Google, the One Tap way".
-  googleEnabled: false,
-  googleClientId: "",
+  googleEnabled: true,
+  googleClientId: "114448080261-uvmiji3ses3t9ebr7cs55jkhutstjeit.apps.googleusercontent.com",
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmZmZndWltY2F3anh0Ymllc3FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyOTU5MjAsImV4cCI6MjEwMTg3MTkyMH0.qzQ-KXDVstfmGB0VlxydkRrvN0CAz-K4AzwqbVopJPk",
 };
